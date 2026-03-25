@@ -71,7 +71,7 @@ ignore = [
     "B008",
     "RUF012",
 ]
-unfixable = ["F401"]
+unfixable = []
 
 [tool.ruff.lint.isort]
 known-first-party = ["clinical_trial_agent"]
