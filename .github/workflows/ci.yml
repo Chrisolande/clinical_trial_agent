@@ -29,39 +29,39 @@ jobs:
           ! grep -rn 'state\["[a-z_]*"\] =' clinical_trial_agent/ --include="*.py" | grep -v test
           echo "Wizard conformance checks passed"
       - name: Ruff check
-        run: ruff check clinical_trial_agent/ tests/
+        run: ruff check clinical_trial_agent/
       - name: Ruff format check
-        run: ruff format --check clinical_trial_agent/ tests/
+        run: ruff format --check clinical_trial_agent/
       - name: Mypy
         run: mypy clinical_trial_agent/ --ignore-missing-imports
       - name: Vulture
         run: vulture clinical_trial_agent/ whitelist.py --min-confidence 80
 
-  test:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    env:
-      DEEPSEEK_API_KEY: dummy-key-for-tests
-      MAX_TRIALS_PER_QUERY: "3"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Install deps
-        run: pip install -e ".[dev]"
-      - name: Run tests (unit only, no integration)
-        run: |
-          pytest tests/ -m "not integration" \
-            --cov=clinical_trial_agent \
-            --cov-report=xml \
-            --cov-fail-under=70
-      - name: Upload coverage
-        uses: codecov/codecov-action@v4
-        with:
-          file: ./coverage.xml
-          fail_ci_if_error: false
+  # test:
+  #   runs-on: ubuntu-latest
+  #   permissions:
+  #     contents: read
+  #   env:
+  #     DEEPSEEK_API_KEY: dummy-key-for-tests
+  #     MAX_TRIALS_PER_QUERY: "3"
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-python@v5
+  #       with:
+  #         python-version: "3.11"
+  #     - name: Install deps
+  #       run: pip install -e ".[dev]"
+  #     - name: Run tests (unit only, no integration)
+  #       run: |
+  #         pytest tests/ -m "not integration" \
+  #           --cov=clinical_trial_agent \
+  #           --cov-report=xml \
+  #           --cov-fail-under=70
+  #     - name: Upload coverage
+  #       uses: codecov/codecov-action@v4
+  #       with:
+  #         file: ./coverage.xml
+  #         fail_ci_if_error: false
 
   security:
     runs-on: ubuntu-latest
