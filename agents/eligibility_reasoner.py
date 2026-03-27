@@ -3,13 +3,12 @@ from typing import Any
 
 from config import get_llm
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
 from loguru import logger
 from models.criteria import CriterionAssessment, EligibilityAssessmentList
 from prompts.eligibility import EVALUATION_PROMPT
 
 
-def _build_eligibility_chain(llm: ChatOpenAI) -> Any:
+def _build_eligibility_chain(llm: Any) -> Any:
     prompt = ChatPromptTemplate.from_template(EVALUATION_PROMPT)
     structured_llm = llm.with_structured_output(EligibilityAssessmentList)
     return prompt | structured_llm
@@ -175,3 +174,17 @@ async def assess_patient_eligibility(
     final_verdicts = _build_verdicts(criteria, raw_verdicts)
     counts = _count_verdicts(final_verdicts)
     return final_verdicts, counts
+
+
+async def evaluate_criteria_batch(
+    patient_profile: dict[str, Any],
+    trial: dict[str, Any],
+    all_criteria: list[dict[str, Any]],
+) -> dict[str, Any]:
+    nct_id = trial.get("nct_id", "unknown")
+    verdicts, counts = await assess_patient_eligibility(patient_profile, all_criteria)
+    return {
+        "trial_id": nct_id,
+        "verdicts": verdicts,
+        **counts,
+    }

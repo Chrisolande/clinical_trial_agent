@@ -5,3 +5,5 @@
 .vscode/
 .env
 clinical_trial_agent.egg-info
+.idea/
+__pycache__/

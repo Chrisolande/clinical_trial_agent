@@ -8,12 +8,16 @@ import os
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from diskcache import Cache
 from loguru import logger
-from postgres_base import PostgresBase
+
+from tools.postgres_base import PostgresBase
 
 if TYPE_CHECKING:
     import asyncpg
 _DEFAULT_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", str(3600 * 24)))
+_DEFAULT_CACHE_DIR = os.getenv("CACHE_DIR", "/tmp/clinical_trial_cache")
+_cache = Cache(_DEFAULT_CACHE_DIR)
 
 _DDL = """
     CREATE TABLE IF NOT EXISTS llm_cache (
@@ -32,6 +36,21 @@ def _make_key(prefix: str, data: Any) -> str:
     serialized = json.dumps(data, sort_keys=True, default=str)
     digest = hashlib.sha256(serialized.encode()).hexdigest()[:16]
     return f"{prefix}:{digest}"
+
+
+def get_cached(prefix: str, params: Any) -> Any | None:
+    key = _make_key(prefix, params)
+    return _cache.get(key)
+
+
+def set_cached(
+    prefix: str,
+    params: Any,
+    value: Any,
+    ttl_seconds: int = _DEFAULT_TTL_SECONDS,
+) -> None:
+    key = _make_key(prefix, params)
+    _cache.set(key, value, expire=ttl_seconds)
 
 
 class LLMCache(PostgresBase):

@@ -11,9 +11,11 @@ from models.missing_info import CompletenessAssessmentList
 from prompts.missinginfo import COMPLETENESS_PROMPT
 from tools.retry import llm_retry
 
-_chain = ChatPromptTemplate.from_template(COMPLETENESS_PROMPT) | get_llm().with_structured_output(
-    CompletenessAssessmentList
-)
+
+def _get_chain():
+    return ChatPromptTemplate.from_template(COMPLETENESS_PROMPT) | get_llm().with_structured_output(
+        CompletenessAssessmentList
+    )
 
 
 def _build_uncertain_summary(
@@ -41,7 +43,8 @@ async def _invoke_missing_info_llm(
     patient_profile: dict[str, Any],
     uncertain_summary: str,
 ) -> CompletenessAssessmentList:
-    return await _chain.ainvoke(
+    chain = _get_chain()
+    return await chain.ainvoke(
         {
             "patient_profile": _format_profile_summary(patient_profile),
             "trial_verdicts": uncertain_summary,

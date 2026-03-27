@@ -7,7 +7,7 @@ from loguru import logger
 
 _DEFAULT_DSN = os.getenv(
     "MEMORY_DB_DSN",
-    "postgresql://postgres:postgres@localhost:5432/postgres",
+    os.getenv("DATABASE_URI", "postgresql://postgres:postgres@localhost:5432/postgres"),
 )
 
 

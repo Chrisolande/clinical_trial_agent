@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Any, TypeVar
 
 import httpx
 from config import settings
-from loguru import logger
 from tenacity import (
     RetryError,
     before_sleep_log,
@@ -16,7 +16,7 @@ from tenacity import (
 )
 
 __all__ = ["RetryError", "http_retry", "llm_retry"]
-
+std_logger = logging.getLogger("tenacity.retry")
 F = TypeVar("F", bound=Callable[..., Any])
 
 _TRANSIENT_LLM_ERRORS = (TimeoutError, ConnectionError)
@@ -32,7 +32,7 @@ def _base_retry(retry_condition: Any) -> Any:
             jitter=settings.retry_jitter,
         ),
         retry=retry_condition,
-        before_sleep=before_sleep_log(logger),
+        before_sleep=before_sleep_log(std_logger, logging.INFO),
         reraise=True,
     )
 
