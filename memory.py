@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
-from postgres_base import _DEFAULT_DSN, PostgresBase
+from tools.postgres_base import _DEFAULT_DSN, PostgresBase
 
 if TYPE_CHECKING:
     import asyncpg

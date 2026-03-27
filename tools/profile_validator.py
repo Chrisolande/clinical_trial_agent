@@ -151,30 +151,3 @@ def validate_patient_profile(profile_raw: str) -> ValidationResult:
         missing_helpful=missing_helpful,
         message="Profile contains sufficient information to proceed.",
     )
-
-
-if __name__ == "__main__":
-    print(" Test 1: Empty Profile ")
-    res1 = validate_patient_profile("   ")
-    print(f"Valid: {res1.is_valid} | Required: {res1.missing_required}\n")
-
-    print(" Test 2: Too Short & Missing Context ")
-    res2 = validate_patient_profile("The patient has cancer.")
-    print(f"Valid: {res2.is_valid} | Required: {res2.missing_required}\n")
-
-    print(" Test 3: Substring Trap")
-    trap_text = "The management team showed courage during the meeting today."
-    res3 = validate_patient_profile(trap_text)
-    print(f"Valid: {res3.is_valid} | Required: {res3.missing_required}\n")
-
-    print(" Test 4: Valid but Missing Helpful (Age/Stage) ")
-    res4 = validate_patient_profile(
-        "Patient diagnosed with NSCLC, planning to start treatment. Previous history of hypertension."
-    )
-    print(f"Valid: {res4.is_valid} | Helpful Missing: {res4.missing_helpful}\n")
-
-    print(" Test 5: Perfect Profile ")
-    res5 = validate_patient_profile(
-        "65 y.o male with metastatic NSCLC. EGFR mutation positive. Prior chemo."
-    )
-    print(f"Valid: {res5.is_valid} | Message: {res5.message}")

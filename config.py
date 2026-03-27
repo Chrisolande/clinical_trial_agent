@@ -1,5 +1,8 @@
 import os
 
+from langchain_openai import ChatOpenAI
+from pydantic import SecretStr
+
 
 class Settings:
     deepseek_api_key: str = os.getenv("DEEPSEEK_API_KEY", "")
@@ -14,6 +17,11 @@ class Settings:
 
 settings = Settings()
 
-if __name__ == "__main__":
-    settings = Settings()
-    print(settings.openai_base_url)
+
+def get_llm() -> ChatOpenAI:
+    return ChatOpenAI(
+        model=settings.openai_model,
+        base_url=settings.base_url,
+        temperature=0.0,
+        openai_api_key=SecretStr(settings.openai_api_key),
+    )

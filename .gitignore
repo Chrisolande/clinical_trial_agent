@@ -1,10 +1,7 @@
-
-
-#Ignore vscode AI rules
-.github/instructions/codacy.instructions.md
 .env.schema
 
 .codacy/
 .vincent/
 .vscode/
 .env
+clinical_trial_agent.egg-info
