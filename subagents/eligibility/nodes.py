@@ -5,7 +5,7 @@ from config import settings
 from langgraph.types import Send
 from loguru import logger
 
-from subagents.eligibility.state import EligibilityState, TrialWorkerState
+from .state import EligibilityState, TrialWorkerState
 
 
 def _patient_profile_to_dict(patient_profile: Any) -> dict[str, Any]:
@@ -72,12 +72,20 @@ async def evaluate_trial_worker(state: TrialWorkerState) -> dict[str, Any]:
         }
 
     inclusion = [
-        {**c, "criteria_type": "inclusion"}
+        (
+            {**c, "criteria_type": "inclusion"}
+            if isinstance(c, dict)
+            else {"text": str(c), "criteria_type": "inclusion"}
+        )
         for c in trial_with_criteria.get("inclusion_criteria", [])
     ]
 
     exclusion = [
-        {**c, "criteria_type": "exclusion"}
+        (
+            {**c, "criteria_type": "exclusion"}
+            if isinstance(c, dict)
+            else {"text": str(c), "criteria_type": "exclusion"}
+        )
         for c in trial_with_criteria.get("exclusion_criteria", [])
     ]
 

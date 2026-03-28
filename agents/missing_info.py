@@ -7,7 +7,7 @@ from typing import Any
 from config import get_llm
 from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
-from models.missing_info import CompletenessAssessmentList
+from models.missing_info import CompletenessAssessment, CompletenessAssessmentList
 from prompts.missinginfo import COMPLETENESS_PROMPT
 from tools.retry import llm_retry
 
@@ -55,7 +55,7 @@ async def _invoke_missing_info_llm(
 
 async def identify_missing_info(
     patient_profile: dict[str, Any], eligibility_verdicts: dict[str, dict[str, Any]]
-) -> list[dict[str, Any]]:
+) -> list[CompletenessAssessment] | list[dict[str, Any]]:
     uncertain_by_theme, uncertain_summary = _build_uncertain_summary(eligibility_verdicts)
     if not uncertain_by_theme:
         return []

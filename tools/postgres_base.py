@@ -1,14 +1,8 @@
 from __future__ import annotations
 
-import os
-
 import asyncpg
+from config import settings
 from loguru import logger
-
-_DEFAULT_DSN = os.getenv(
-    "MEMORY_DB_DSN",
-    os.getenv("DATABASE_URI", "postgresql://postgres:postgres@localhost:5432/postgres"),
-)
 
 
 class PostgresBase:
@@ -16,7 +10,7 @@ class PostgresBase:
 
     def __init__(
         self,
-        dsn: str = _DEFAULT_DSN,
+        dsn: str = settings.memory_db_dsn,
         pool_min: int = 2,
         pool_max: int = 10,
     ) -> None:

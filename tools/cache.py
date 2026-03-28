@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from config import settings
 from diskcache import Cache
 from loguru import logger
 
@@ -15,9 +15,8 @@ from tools.postgres_base import PostgresBase
 
 if TYPE_CHECKING:
     import asyncpg
-_DEFAULT_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", str(3600 * 24)))
-_DEFAULT_CACHE_DIR = os.getenv("CACHE_DIR", "/tmp/clinical_trial_cache")
-_cache = Cache(_DEFAULT_CACHE_DIR)
+
+_cache = Cache(settings.cache_dir)
 
 _DDL = """
     CREATE TABLE IF NOT EXISTS llm_cache (
@@ -47,10 +46,11 @@ def set_cached(
     prefix: str,
     params: Any,
     value: Any,
-    ttl_seconds: int = _DEFAULT_TTL_SECONDS,
+    ttl_seconds: int | None = None,
 ) -> None:
     key = _make_key(prefix, params)
-    _cache.set(key, value, expire=ttl_seconds)
+    ttl = ttl_seconds if ttl_seconds is not None else settings.cache_ttl_seconds
+    _cache.set(key, value, expire=ttl)
 
 
 class LLMCache(PostgresBase):
@@ -83,11 +83,12 @@ class LLMCache(PostgresBase):
         prefix: str,
         params: Any,
         value: Any,
-        ttl_seconds: int = _DEFAULT_TTL_SECONDS,
+        ttl_seconds: int | None = None,
     ) -> None:
         key = _make_key(prefix, params)
         now = datetime.now(UTC)
-        expires = now + timedelta(seconds=ttl_seconds)
+        ttl = ttl_seconds if ttl_seconds is not None else settings.cache_ttl_seconds
+        expires = now + timedelta(seconds=ttl)
         async with self._pool_or_raise().acquire() as conn:
             await conn.execute(
                 """

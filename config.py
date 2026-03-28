@@ -66,6 +66,17 @@ class Settings:
     use_cache: bool
     database_uri: str
     memory_db_dsn: str
+    ctgov_user_agent: str
+    ctgov_accept: str
+    ctgov_retry_attempts: int
+    ctgov_retry_backoff_base: float
+    ctgov_base_url: str
+    max_trials_per_query: int
+    cache_ttl_seconds: int
+    cache_dir: str
+    memory_ttl_days: int
+    log_level: str
+    max_retry_attempts: int = 5
 
 
 def load_settings() -> Settings:
@@ -89,6 +100,16 @@ def load_settings() -> Settings:
         use_cache=_as_bool(os.getenv("USE_CACHE"), default=True),
         database_uri=database_uri,
         memory_db_dsn=memory_dsn,
+        ctgov_user_agent=os.getenv("CTGOV_USER_AGENT", "clinical-trial-agent"),
+        ctgov_accept=os.getenv("CTGOV_ACCEPT", "application/json"),
+        ctgov_retry_attempts=int(os.getenv("CTGOV_RETRY_ATTEMPTS", "5")),
+        ctgov_retry_backoff_base=float(os.getenv("CTGOV_RETRY_BACKOFF_BASE", "2.0")),
+        ctgov_base_url=os.getenv("CTGOV_BASE_URL", "https://clinicaltrials.gov/api/v2"),
+        max_trials_per_query=int(os.getenv("MAX_TRIALS_PER_QUERY", "10")),
+        cache_ttl_seconds=int(os.getenv("CACHE_TTL_SECONDS", str(3600 * 24))),
+        cache_dir=os.getenv("CACHE_DIR", "/tmp/clinical_trial_cache"),
+        memory_ttl_days=int(os.getenv("MEMORY_TTL_DAYS", "30")),
+        log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
     )
 
 

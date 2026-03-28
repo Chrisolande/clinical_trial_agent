@@ -4,37 +4,50 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from config import settings
 from loguru import logger
-from tools.postgres_base import _DEFAULT_DSN, PostgresBase
+from tools.postgres_base import PostgresBase
 
 if TYPE_CHECKING:
     import asyncpg
 
-_DEFAULT_TTL_DAYS = int(os.getenv("MEMORY_TTL_DAYS", "30"))
 
 _DDL = """
+
     CREATE TABLE IF NOT EXISTS schema_version (
+
         version INTEGER PRIMARY KEY
+
     );
+
     CREATE TABLE IF NOT EXISTS patient_runs (
+
         profile_hash  TEXT PRIMARY KEY,
+
         result_json   JSONB NOT NULL,
+
         created_at    TIMESTAMPTZ NOT NULL,
+
         expires_at    TIMESTAMPTZ NOT NULL
+
     );
+
     CREATE INDEX IF NOT EXISTS idx_patient_runs_expires_at
+
         ON patient_runs (expires_at);
+
 """
+
 
 _SCHEMA_VERSION = 1
 
 
 def _patient_hash(patient_profile: dict[str, Any]) -> str:
     canonical = json.dumps(patient_profile, sort_keys=True, default=str)
+
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
@@ -43,8 +56,8 @@ class EpisodicMemory(PostgresBase):
 
     def __init__(
         self,
-        dsn: str = _DEFAULT_DSN,
-        ttl_days: int = _DEFAULT_TTL_DAYS,
+        dsn: str = settings.memory_db_dsn,
+        ttl_days: int = settings.memory_ttl_days,
         pool_min: int = 2,
         pool_max: int = 10,
     ) -> None:
@@ -139,7 +152,7 @@ class EpisodicMemory(PostgresBase):
         return removed
 
 
-def get_checkpointer(dsn: str = _DEFAULT_DSN) -> Any | None:
+def get_checkpointer(dsn: str = settings.database_uri) -> Any | None:
     try:
         from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 

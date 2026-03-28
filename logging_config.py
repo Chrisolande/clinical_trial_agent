@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-import os
 import sys
 
+from config import settings
 from loguru import logger
 
 
 def configure_logging() -> None:
     """Configure loguru with consistent format and noise suppression."""
-    level = os.getenv("LOG_LEVEL", "INFO").upper()
+    level = settings.log_level
 
     logger.remove()
     logger.add(

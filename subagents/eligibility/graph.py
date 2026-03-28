@@ -6,7 +6,7 @@ from config import bootstrap_environment, settings
 from langgraph.graph import END, START, StateGraph
 from memory import get_checkpointer
 
-from subagents.eligibility.nodes import (
+from .nodes import (
     aggregate_results,
     assess_viability_signal,
     dispatch_trial_workers,
@@ -14,7 +14,7 @@ from subagents.eligibility.nodes import (
     fan_out_trials,
     identify_missing_info,
 )
-from subagents.eligibility.state import (
+from .state import (
     EligibilityInput,
     EligibilityOutput,
     EligibilityState,

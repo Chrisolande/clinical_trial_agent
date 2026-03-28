@@ -1,4 +1,4 @@
-"""Trial scoring and ranking agent."""
+"""Trial scoring and ranking agent using standard ML libraries."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 from config import settings
-from scipy.stats import binomtest, rankdata
+from scipy.stats import binomtest
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.tree import DecisionTreeClassifier
 
@@ -14,64 +14,63 @@ HARD_EXCLUSION_WEIGHT = -0.5
 
 
 def _build_tier_classifier() -> DecisionTreeClassifier:
+    """Builds a decision tree using vectorized numpy operations instead of loops."""
+    # 1. Define feature spaces
     scores = np.linspace(0.0, 1.0, 11)
     confidences = np.linspace(0.0, 1.0, 11)
-    hf_rates = [0.0, 0.10, 0.15, 0.20, 0.30, 0.50]
+    hf_rates = np.array([0.0, 0.10, 0.15, 0.20, 0.30, 0.50])
 
-    X_rows: list[list[float]] = []
-    y_rows: list[str] = []
+    # 2. Create a vectorized feature grid (Meshgrid)
+    S, C, H = np.meshgrid(scores, confidences, hf_rates)
+    X = np.column_stack([S.ravel(), C.ravel(), H.ravel()])
 
-    for s in scores:
-        for c in confidences:
-            for hfr in hf_rates:
-                if hfr >= 0.20:
-                    label = "unlikely_match"
-                elif s >= 0.7 and c >= 0.3:
-                    label = "strong_match"
-                elif s >= 0.7 and c >= 0.15 or s >= 0.5 and c >= 0.25 or s >= 0.4 and c >= 0.4:
-                    label = "possible_match"
-                else:
-                    label = "unlikely_match"
-                X_rows.append([s, c, hfr])
-                y_rows.append(label)
+    # 3. Vectorized labeling using np.select
+    conditions = [
+        (X[:, 2] >= 0.20),
+        (X[:, 0] >= 0.7) & (X[:, 1] >= 0.5),
+        (X[:, 0] >= 0.7) & (X[:, 1] >= 0.15),
+        (X[:, 0] >= 0.5) & (X[:, 1] >= 0.25),
+        (X[:, 0] >= 0.4) & (X[:, 1] >= 0.4),
+    ]
+    choices = [
+        "unlikely_match",
+        "strong_match",
+        "possible_match",
+        "possible_match",
+        "possible_match",
+    ]
 
-    clf = DecisionTreeClassifier(max_depth=6, random_state=0)
-    clf.fit(np.array(X_rows), y_rows)
+    y = np.select(conditions, choices, default="unlikely_match")
+
+    # 4. Train the classifier
+    clf = DecisionTreeClassifier(max_depth=6, random_state=42)
+    clf.fit(X, y)
     return clf
 
 
+# Initialize model at module load
 _TIER_CLF = _build_tier_classifier()
 
 
-def _classify_tier(score: float, hard_fails: int, confidence: float, total_known: int) -> str:
-    hard_fail_rate = hard_fails / total_known if total_known > 0 else 0.0
-    features = np.array([[score, confidence, hard_fail_rate]])
-    return str(_TIER_CLF.predict(features)[0])
-
-
-# Wilson confidence interval
-
-
-def _wilson_ci(successes: int, total: int) -> tuple[float, float]:
+def _wilson_ci(successes: int, total: int, hard_fails: int = 0) -> tuple[float, float]:
+    """Scipy binomial test with a hard-fail veto."""
+    if hard_fails > 0:
+        return 0.0, 0.0
     if total == 0:
         return 0.0, 1.0
+
     successes = min(successes, total)
     ci = binomtest(successes, total).proportion_ci(confidence_level=0.95, method="wilson")
     return round(float(ci.low), 4), round(float(ci.high), 4)
 
 
-# Score computation
-
-
-def _compute_score_confidence(meets, soft_fails, hard_fails, uncertain, total):
+def _compute_score_confidence(
+    meets: int, soft_fails: int, hard_fails: int, uncertain: int, total: int
+):
     known = meets + soft_fails + hard_fails
-    score = 0.5 if known == 0 else meets / known + hard_fails * HARD_EXCLUSION_WEIGHT
-    confidence = max(0.1, known / total) if total > 0 else 0.1
-    score = max(0.0, min(1.0, score))
-    return round(score, 4), round(confidence, 4)
-
-
-# Verdict key helpers
+    score = 0.5 if known == 0 else (meets / known) + (hard_fails * HARD_EXCLUSION_WEIGHT)
+    confidence = max(0.1, min(1.0, known / total)) if total > 0 else 0.1
+    return round(max(0.0, min(1.0, score)), 4), round(confidence, 4)
 
 
 def _collect_verdict_keys(verdicts: list[dict]) -> tuple[list, list, list]:
@@ -93,12 +92,23 @@ def _format_locations(trial: dict) -> list[str]:
     ]
 
 
-# Per-trial scoring
+def _build_trial_lookup(trials_with_criteria: list, trials_raw: list | None) -> dict:
+    """Helper to reduce complexity in the main loop."""
+    lookup = {}
+    for twc in trials_with_criteria:
+        if nct_id := twc.get("trial", {}).get("nct_id"):
+            lookup[nct_id] = twc.get("trial")
+
+    for trial in trials_raw or []:
+        if (nct_id := trial.get("nct_id")) and nct_id not in lookup:
+            lookup[nct_id] = trial
+    return lookup
 
 
-def score_trial(eligibility_result, trial_data):
+def score_trial(eligibility_result: dict, trial_data: dict) -> dict[str, Any]:
     verdicts = eligibility_result.get("verdicts", [])
     trial = trial_data.get("trial", trial_data)
+
     if not verdicts:
         return _build_scored_trial(trial, 0.0, 0, 0, 0, 0)
 
@@ -106,14 +116,12 @@ def score_trial(eligibility_result, trial_data):
     fails = eligibility_result.get("fails_count", 0)
     uncertain = eligibility_result.get("uncertain_count", 0)
     hard_fails = eligibility_result.get("hard_exclusion_failures", 0)
-    total_known = meets + fails
-    total = len(verdicts)
 
+    total = meets + fails + uncertain
     score, confidence = _compute_score_confidence(
         meets, fails - hard_fails, hard_fails, uncertain, total
     )
     inc_passed, exc_failed, unc_list = _collect_verdict_keys(verdicts)
-    ci_lower, ci_upper = _wilson_ci(meets, total)
 
     return {
         "trial_id": trial.get("nct_id", ""),
@@ -121,11 +129,8 @@ def score_trial(eligibility_result, trial_data):
         "overall_status": trial.get("overall_status", ""),
         "phase": trial.get("phase"),
         "lead_sponsor": trial.get("lead_sponsor"),
-        "score": round(score, 4),
-        "tier": _classify_tier(score, hard_fails, confidence, total_known),
-        "confidence": round(confidence, 4),
-        "score_ci_lower": ci_lower,
-        "score_ci_upper": ci_upper,
+        "score": score,
+        "confidence": confidence,
         "meets_count": meets,
         "fails_count": fails,
         "uncertain_count": uncertain,
@@ -139,14 +144,8 @@ def score_trial(eligibility_result, trial_data):
 
 
 def _build_scored_trial(
-    trial: dict[str, Any],
-    score: float,
-    meets: int,
-    fails: int,
-    uncertain: int,
-    hard_fails: int,
+    trial: dict[str, Any], score: float, meets: int, fails: int, uncertain: int, hard_fails: int
 ) -> dict[str, Any]:
-    ci_lower, ci_upper = _wilson_ci(meets, meets + fails + uncertain)
     return {
         "trial_id": trial.get("nct_id", ""),
         "brief_title": trial.get("brief_title", ""),
@@ -154,10 +153,7 @@ def _build_scored_trial(
         "phase": trial.get("phase"),
         "lead_sponsor": trial.get("lead_sponsor"),
         "score": score,
-        "tier": _classify_tier(score, hard_fails, 0.0, meets + fails),
         "confidence": 0.1,
-        "score_ci_lower": ci_lower,
-        "score_ci_upper": ci_upper,
         "meets_count": meets,
         "fails_count": fails,
         "uncertain_count": uncertain,
@@ -170,56 +166,62 @@ def _build_scored_trial(
     }
 
 
-# Batch scoring, normalization, and ranking
-
-
-def score_and_rank_trials(eligibility_verdicts, trials_with_criteria, trials_raw=None):
-    trial_lookup = {
-        twc.get("trial", {}).get("nct_id", ""): twc
-        for twc in trials_with_criteria
-        if twc.get("trial", {}).get("nct_id", "")
-    }
-    for trial in trials_raw or []:
-        nct_id = trial.get("nct_id", "")
-        if nct_id and nct_id not in trial_lookup:
-            trial_lookup[nct_id] = {"trial": trial}
+def score_and_rank_trials(
+    eligibility_verdicts: dict, trials_with_criteria: list, trials_raw: list | None = None
+) -> list[dict]:
+    trial_lookup = _build_trial_lookup(trials_with_criteria, trials_raw)
 
     scored = [
-        score_trial(verdict, trial_lookup.get(nct_id, {"trial": {"nct_id": nct_id}}))
+        score_trial(verdict, trial_lookup.get(nct_id, {"nct_id": nct_id}))
         for nct_id, verdict in eligibility_verdicts.items()
     ]
+
     if not scored:
         return scored
 
-    raw_scores = np.array([t["score"] for t in scored], dtype=float).reshape(-1, 1)
-    normalized = (
-        raw_scores.flatten()
-        if raw_scores.max() == raw_scores.min()
-        else MinMaxScaler().fit_transform(raw_scores).flatten()
-    )
-    ranks = (len(scored) + 1) - rankdata(normalized, method="average")
+    # --- ML Pipeline: Normalization and Prediction ---
 
-    for trial, norm_score, rank in zip(scored, normalized, ranks, strict=False):
-        norm_score_f = round(float(norm_score), 4)
-        trial["score"] = norm_score_f
-        trial["rank"] = int(rank)
+    # 1. Scikit-Learn MinMaxScaler
+    raw_scores = np.array([t["score"] for t in scored]).reshape(-1, 1)
+    if raw_scores.max() == raw_scores.min():
+        normalized = raw_scores.flatten()
+    else:
+        normalized = MinMaxScaler().fit_transform(raw_scores).flatten()
+
+    # 2. Extract features for bulk ML Prediction
+    confidences = np.array([t["confidence"] for t in scored])
+    hard_fails = np.array([t["hard_exclusion_failures"] for t in scored])
+    totals = np.array([t["meets_count"] + t["fails_count"] for t in scored])
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        hf_rates = np.where(totals > 0, hard_fails / totals, 0.0)
+
+    tier_features = np.column_stack([normalized, confidences, hf_rates])
+
+    # Predict all tiers at once
+    tiers = _TIER_CLF.predict(tier_features)
+
+    # 3. Map features and CIs back to dictionaries
+    for i, trial in enumerate(scored):
+        trial["score"] = round(float(normalized[i]), 4)
+        trial["tier"] = tiers[i]
+
+        tot = trial["meets_count"] + trial["fails_count"] + trial["uncertain_count"]
         trial["score_ci_lower"], trial["score_ci_upper"] = _wilson_ci(
-            trial["meets_count"], len(trial.get("key_inclusion_passed", []))
-        )
-        trial["tier"] = _classify_tier(
-            norm_score_f,
-            trial["hard_exclusion_failures"],
-            trial["confidence"],
-            trial["meets_count"] + trial["fails_count"],
+            trial["meets_count"], tot, trial["hard_exclusion_failures"]
         )
 
-    return sorted(scored, key=lambda x: x["rank"])
+    # 4. Native tie-breaker sort (Score -> Confidence -> Meets Count)
+    scored.sort(key=lambda x: (x["score"], x["confidence"], x["meets_count"]), reverse=True)
+
+    # 5. Assign clean integer ranks
+    for rank, trial in enumerate(scored, 1):
+        trial["rank"] = rank
+
+    return scored
 
 
-def count_viable_trials(
-    scored_trials: list[dict[str, Any]],
-    min_score: float | None = None,
-) -> int:
+def count_viable_trials(scored_trials: list[dict[str, Any]], min_score: float | None = None) -> int:
     """Count trials with normalized score above threshold."""
     if min_score is None:
         min_score = settings.min_match_score
