@@ -1,5 +1,3 @@
-"""Trial scoring and ranking agent using standard ML libraries."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -14,17 +12,13 @@ HARD_EXCLUSION_WEIGHT = -0.5
 
 
 def _build_tier_classifier() -> DecisionTreeClassifier:
-    """Builds a decision tree using vectorized numpy operations instead of loops."""
-    # 1. Define feature spaces
     scores = np.linspace(0.0, 1.0, 11)
     confidences = np.linspace(0.0, 1.0, 11)
     hf_rates = np.array([0.0, 0.10, 0.15, 0.20, 0.30, 0.50])
 
-    # 2. Create a vectorized feature grid (Meshgrid)
     S, C, H = np.meshgrid(scores, confidences, hf_rates)
     X = np.column_stack([S.ravel(), C.ravel(), H.ravel()])
 
-    # 3. Vectorized labeling using np.select
     conditions = [
         (X[:, 2] >= 0.20),
         (X[:, 0] >= 0.7) & (X[:, 1] >= 0.5),
@@ -42,7 +36,6 @@ def _build_tier_classifier() -> DecisionTreeClassifier:
 
     y = np.select(conditions, choices, default="unlikely_match")
 
-    # 4. Train the classifier
     clf = DecisionTreeClassifier(max_depth=6, random_state=42)
     clf.fit(X, y)
     return clf
@@ -93,7 +86,6 @@ def _format_locations(trial: dict) -> list[str]:
 
 
 def _build_trial_lookup(trials_with_criteria: list, trials_raw: list | None) -> dict:
-    """Helper to reduce complexity in the main loop."""
     lookup = {}
     for twc in trials_with_criteria:
         if nct_id := twc.get("trial", {}).get("nct_id"):
@@ -144,7 +136,12 @@ def score_trial(eligibility_result: dict, trial_data: dict) -> dict[str, Any]:
 
 
 def _build_scored_trial(
-    trial: dict[str, Any], score: float, meets: int, fails: int, uncertain: int, hard_fails: int
+    trial: dict[str, Any],
+    score: float,
+    meets: int,
+    fails: int,
+    uncertain: int,
+    hard_fails: int,
 ) -> dict[str, Any]:
     return {
         "trial_id": trial.get("nct_id", ""),
@@ -167,7 +164,9 @@ def _build_scored_trial(
 
 
 def score_and_rank_trials(
-    eligibility_verdicts: dict, trials_with_criteria: list, trials_raw: list | None = None
+    eligibility_verdicts: dict,
+    trials_with_criteria: list,
+    trials_raw: list | None = None,
 ) -> list[dict]:
     trial_lookup = _build_trial_lookup(trials_with_criteria, trials_raw)
 
@@ -179,16 +178,14 @@ def score_and_rank_trials(
     if not scored:
         return scored
 
-    # --- ML Pipeline: Normalization and Prediction ---
+    # ML Pipeline: Normalization and Prediction
 
-    # 1. Scikit-Learn MinMaxScaler
     raw_scores = np.array([t["score"] for t in scored]).reshape(-1, 1)
     if raw_scores.max() == raw_scores.min():
         normalized = raw_scores.flatten()
     else:
         normalized = MinMaxScaler().fit_transform(raw_scores).flatten()
 
-    # 2. Extract features for bulk ML Prediction
     confidences = np.array([t["confidence"] for t in scored])
     hard_fails = np.array([t["hard_exclusion_failures"] for t in scored])
     totals = np.array([t["meets_count"] + t["fails_count"] for t in scored])
@@ -201,7 +198,6 @@ def score_and_rank_trials(
     # Predict all tiers at once
     tiers = _TIER_CLF.predict(tier_features)
 
-    # 3. Map features and CIs back to dictionaries
     for i, trial in enumerate(scored):
         trial["score"] = round(float(normalized[i]), 4)
         trial["tier"] = tiers[i]
@@ -211,10 +207,8 @@ def score_and_rank_trials(
             trial["meets_count"], tot, trial["hard_exclusion_failures"]
         )
 
-    # 4. Native tie-breaker sort (Score -> Confidence -> Meets Count)
     scored.sort(key=lambda x: (x["score"], x["confidence"], x["meets_count"]), reverse=True)
 
-    # 5. Assign clean integer ranks
     for rank, trial in enumerate(scored, 1):
         trial["rank"] = rank
 
