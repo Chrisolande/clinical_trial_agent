@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from agents import qa_checker, report_generator
 from loguru import logger
 
-from ...agents import qa_checker, report_generator
-from .state import SynthesisState
+from .state import SynthesisState  # noqa: TCH001
 
 
-async def run_qa_check(state: SynthesisState):
+async def run_qa_check(state: SynthesisState) -> dict[str, Any]:
     try:
         result = await qa_checker.run_qa_check(
             patient_profile=state.get("patient_profile") or {},
@@ -45,7 +45,7 @@ def route_after_qa(
     return "flag_re_evaluation"
 
 
-async def attempt_qa_fix(state: SynthesisState):
+async def attempt_qa_fix(state: SynthesisState) -> dict[str, Any]:
     """Attempt to fix QA issues by re-sorting/re-scoring within synthesis."""
     issues = state.get("qa_issues") or []
     scored = list(state.get("trial_scores") or [])

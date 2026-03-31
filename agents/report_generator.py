@@ -7,32 +7,9 @@ from typing import Any
 from config import get_llm
 from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
+from prompts.synthesis import build_synthesis_prompt
 from pydantic import BaseModel, Field
 from tools.retry import llm_retry
-
-_REPORT_PROMPT = """
-You are an expert clinical trial matching report writer.
-Your task is to generate a clear, professional executive summary of a patient's clinical trial matching results.
-
-Guidelines:
-1. Briefly describe the patient (condition, key characteristics, anonymized).
-2. State the total trials evaluated and the breakdown of matches (Strong/Possible/Unlikely).
-3. Highlight the top 1-2 strongest matches and briefly explain why they are strong candidates based on the score and met criteria.
-4. Note any critical information gaps (missing data) that affect the match quality.
-5. Write strictly for a clinical audience (physician-level tone and terminology).
-6. Keep the executive summary concise, between 150-250 words.
-
-INPUT DATA:
------------
-Patient: {patient_summary}
-
-Results: {strong_count} strong matches, {possible_count} possible matches, {unlikely_count} unlikely matches out of {total} evaluated.
-
-Top trials:
-{top_trials}
-
-Key missing information: {missing_info}
-"""
 
 
 class ExecutiveSummaryModel(BaseModel):
@@ -44,15 +21,12 @@ class ExecutiveSummaryModel(BaseModel):
     )
 
 
-## get llm
-
-
-def _count_tiers(scored_trials):
+def _count_tiers(scored_trials: list[dict[str, Any]]) -> tuple[int, int, int]:
     tiers = Counter(t.get("tier") for t in scored_trials)
     return tiers["strong_match"], tiers["possible_match"], tiers["unlikely_match"]
 
 
-def _describe_patient(patient_profile):
+def _describe_patient(patient_profile: dict[str, Any]) -> str:
     conds = patient_profile.get("conditions", [])
     primary = patient_profile.get("primary_condition") or conds[0] if conds else "unknown condition"
     age = patient_profile.get("age", "unknown age")
@@ -60,7 +34,11 @@ def _describe_patient(patient_profile):
     return f"{age} year old {sex} patient with {primary}".strip()
 
 
-def _build_exec_summary_context(patient_profile, scored_trials, missing_info):
+def _build_exec_summary_context(
+    patient_profile: dict[str, Any],
+    scored_trials: list[dict[str, Any]],
+    missing_info: list[dict[str, Any]],
+) -> dict[str, Any]:
     strong, possible, unlikely = _count_tiers(scored_trials)
     top_trials_summary = "\n".join(
         f"- {t['brief_title']} ({t['trial_id']}): score={t['score']:.2f}, "
@@ -91,9 +69,13 @@ async def _invoke_exec_summary_llm(chain, context):
     return result.model_dump()
 
 
-async def generate_executive_summary(patient_profile, scored_trials, missing_info):
+async def generate_executive_summary(
+    patient_profile: dict[str, Any],
+    scored_trials: list[dict[str, Any]],
+    missing_info: list[dict[str, Any]],
+) -> dict[str, str]:
     context = _build_exec_summary_context(patient_profile, scored_trials, missing_info)
-    prompt = ChatPromptTemplate.from_template(_REPORT_PROMPT)
+    prompt = ChatPromptTemplate.from_template(build_synthesis_prompt())
     chain = prompt | get_llm().with_structured_output(ExecutiveSummaryModel)
 
     try:

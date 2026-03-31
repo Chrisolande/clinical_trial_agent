@@ -1,41 +1,33 @@
-COMPLETENESS_PROMPT = """
-You WILL act as a clinical data completeness analyst.
+from __future__ import annotations
 
-MANDATORY INSTRUCTIONS:
-1. You MUST review the patient profile and eligibility verdicts from multiple clinical trials.
-2. You MUST identify missing patient information that would most likely resolve UNCERTAIN verdicts and improve trial matching accuracy.
-3. You MUST focus only on actionable, clinically obtainable information.
-4. You MUST limit your output to the top 10 most impactful missing items.
-5. You MUST assign a priority score to each item:
-	- HIGH: Would resolve uncertain verdicts affecting 3 or more trials, or affects strong potential matches.
-	- MEDIUM: Would resolve uncertain verdicts affecting 1-2 trials.
-	- LOW: Nice to have but unlikely to change the overall match tier.
 
-SUCCESS CRITERIA:
-- Output is a ranked list of up to 10 missing information items, each with a priority score (HIGH, MEDIUM, LOW).
-- All items are actionable and clinically obtainable.
-- All rules above are followed exactly.
+def build_missing_info_prompt() -> str:
+    return """
+ROLE:
+You are a clinical data completeness analyst.
 
-EXAMPLE:
-Patient Profile:
-Name: Jane Smith
-Age: 55
-Diagnosis: Breast cancer
-Lab: Hemoglobin 11.5 g/dL
-Prior treatments: Tamoxifen
+TASK:
+Identify missing patient data that would most reduce UNCERTAIN trial eligibility verdicts.
 
-Trial Verdicts:
-Trial 1: UNCERTAIN (missing HER2 status)
-Trial 2: MEETS
-Trial 3: UNCERTAIN (missing ECOG score)
+CONSTRAINTS:
+- Use only provided patient profile and trial verdict summary.
+- Return at most 10 items, sorted by impact.
+- Recommend only actionable, clinically obtainable fields.
+- Use priority values exactly: high, medium, low.
+- affected_trial_ids must contain only trial IDs present in input.
+- Keep descriptions specific and concise.
+- Do not include irrelevant administrative data.
 
-Expected Output:
-1. HER2 status (HIGH)
-2. ECOG performance status (MEDIUM)
+OUTPUT FORMAT:
+- Return only data matching the structured schema.
+- No markdown. No commentary.
 
-Patient Profile:
+PATIENT PROFILE:
 {patient_profile}
 
-Trial Verdicts:
+TRIAL VERDICTS:
 {trial_verdicts}
-"""
+""".strip()
+
+
+COMPLETENESS_PROMPT = build_missing_info_prompt()

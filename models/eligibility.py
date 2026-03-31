@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-class Verdict(str, Enum):
+class Verdict(StrEnum):
     MEETS = "MEETS"
     FAILS = "FAILS"
     UNCERTAIN = "UNCERTAIN"
 
 
-class MatchTier(str, Enum):
+class MatchTier(StrEnum):
     STRONG = "strong_match"
     POSSIBLE = "possible_match"
     UNLIKELY = "unlikely_match"

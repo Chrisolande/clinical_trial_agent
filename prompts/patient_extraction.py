@@ -1,39 +1,35 @@
+from __future__ import annotations
+
 from langchain_core.prompts import ChatPromptTemplate
 
-CLINICAL_EXTRACTION_GUIDELINES = """
-You WILL act as a clinical data extraction specialist.
 
-MANDATORY INSTRUCTIONS:
-1. You MUST extract structured patient information from the clinical text provided below.
-2. You MUST omit fields not mentioned in the text rather than guessing.
-3. You MUST infer INN generic drug names from brand names where possible.
-4. You MUST capture all conditions including comorbidities, not just the primary diagnosis.
-5. You MUST normalise lab units to SI where unambiguous (e.g. g/dL stays g/dL, mmol/L stays mmol/L).
-6. You MUST mark lab values as abnormal if the text indicates they are out of range, or if a reference range is provided and the value falls outside it.
-7. You MUST record ECOG as an integer 0-5; if described narratively (e.g. "fully active") you MUST convert to the closest ECOG integer.
-8. For smoking status, you MUST use plain descriptors: "never", "former", "current", or a quoted clinical phrase from the text.
-9. You MUST preserve exact clinical phrasing for prior treatments and surgeries.
+def build_patient_extraction_prompt() -> str:
+    return """
+ROLE:
+You are a clinical data extraction specialist.
 
-SUCCESS CRITERIA:
-- Output is a structured patient profile with only fields present in the text.
-- All rules above are followed exactly.
+TASK:
+Extract structured patient data from free text.
 
-EXAMPLE:
-Clinical text:
-"Jane Smith, 55-year-old female with breast cancer. Hemoglobin 11.5 g/dL (low). Prior treatment: Tamoxifen. ECOG: fully active. Never smoked."
+CONSTRAINTS:
+- Extract only explicit facts or directly inferable facts.
+- Omit unknown fields instead of guessing.
+- Capture primary condition and comorbidities.
+- Normalize medication names to generic when known.
+- Preserve clinical meaning for treatments and surgeries.
+- Keep lab units as provided unless normalization is unambiguous.
+- Set lab abnormal=true only when evidence indicates abnormality.
+- Map ECOG narrative descriptions to integer 0 to 5 when possible.
+- Keep smoking_status concise and standardized when possible.
 
-Expected Output:
-Name: Jane Smith
-Age: 55
-Diagnosis: Breast cancer
-Hemoglobin: 11.5 g/dL (abnormal)
-Prior treatments: Tamoxifen (INN: tamoxifen)
-ECOG: 0
-Smoking status: never
+OUTPUT FORMAT:
+- Return only data matching the structured schema.
+- Deterministic extraction. No markdown. No commentary.
 
-Clinical text:
-
+INPUT:
 {clinical_text}
-"""
+""".strip()
 
+
+CLINICAL_EXTRACTION_GUIDELINES = build_patient_extraction_prompt()
 PATIENT_EXTRACTION_PROMPT = ChatPromptTemplate.from_template(CLINICAL_EXTRACTION_GUIDELINES)

@@ -1,73 +1,85 @@
 from __future__ import annotations
 
+from typing import Any
 
-async def qa_check(patient_profile, eligibility_verdicts, scored_trials):
-    issues = []
+
+async def run_qa_check(
+    patient_profile: dict[str, Any],
+    eligibility_verdicts: dict[str, dict[str, Any]],
+    scored_trials: list[dict[str, Any]],
+) -> dict[str, Any]:
+    issues: list[str] = []
     issues.extend(_check_score_verdict_alignment(eligibility_verdicts, scored_trials))
     issues.extend(_check_age_consistency(patient_profile, eligibility_verdicts))
-
-    qa_passed = len([i for i in issues if "CRITICAL" in i.upper()]) == 0
-    return {
-        "qa_passed": qa_passed,
-        "qa_issues": issues,
-    }
+    qa_passed = not any("CRITICAL" in issue.upper() for issue in issues)
+    return {"qa_passed": qa_passed, "qa_issues": issues}
 
 
-def _check_age_consistency(patient_profile, eligibility_verdicts):
-    # issues = []
+def _check_age_consistency(
+    patient_profile: dict[str, Any],
+    eligibility_verdicts: dict[str, dict[str, Any]],
+) -> list[str]:
     patient_age = patient_profile.get("age")
-    if not patient_age:
+    if not isinstance(patient_age, int | float):
         return []
     age_verdicts = _extract_age_verdicts(eligibility_verdicts)
-    return _detect_age_inconsistency(patient_age, age_verdicts)
+    return _detect_age_inconsistency(int(patient_age), age_verdicts)
 
 
-def _detect_age_inconsistency(patient_age, age_verdicts):
-    age_meets = [tid for tid, vrd in age_verdicts if vrd == "MEETS"]
-    age_fails = [tid for tid, vrd in age_verdicts if vrd == "FAILS"]
+def _detect_age_inconsistency(patient_age: int, age_verdicts: list[tuple[str, str]]) -> list[str]:
+    age_meets = [trial_id for trial_id, verdict in age_verdicts if verdict == "MEETS"]
+    age_fails = [trial_id for trial_id, verdict in age_verdicts if verdict == "FAILS"]
     if age_meets and age_fails and len(age_meets) > 2 and len(age_fails) > 2:
         return [
-            f"Age criterion inconsistency: patient (age {patient_age}) both meets and fails "
-            f"age criteria across trials. Review: meets in {age_meets[:2]}, fails in {age_fails[:2]}."
+            (
+                f"Age criterion inconsistency: patient (age {patient_age}) both meets and fails "
+                f"age criteria across trials. Review: meets in {age_meets[:2]}, "
+                f"fails in {age_fails[:2]}."
+            )
         ]
     return []
 
 
-def _extract_age_verdicts(eligibility_verdicts):
-    age_verdicts = []
+def _extract_age_verdicts(
+    eligibility_verdicts: dict[str, dict[str, Any]],
+) -> list[tuple[str, str]]:
+    age_verdicts: list[tuple[str, str]] = []
     for trial_id, verdict_data in eligibility_verdicts.items():
-        for v in verdict_data.get("verdicts", []):
-            text_lower = v.get("criterion_text", "").lower()
+        for verdict in verdict_data.get("verdicts", []):
+            text_lower = str(verdict.get("criterion_text", "")).lower()
             if "age" in text_lower and (
                 "years" in text_lower or "≥" in text_lower or ">=" in text_lower
             ):
-                age_verdicts.append((trial_id, v.get("verdict", "UNCERTAIN")))
-        return age_verdicts
+                age_verdicts.append((trial_id, str(verdict.get("verdict", "UNCERTAIN"))))
+    return age_verdicts
 
 
-def _check_score_verdict_alignment(eligibility_verdicts, scored_trials) -> list[str]:
-    """Check that scores align with verdict data (simplified)."""
-    issues = []
-    score_lookup = {t["trial_id"]: t for t in scored_trials}
-
+def _check_score_verdict_alignment(
+    eligibility_verdicts: dict[str, dict[str, Any]],
+    scored_trials: list[dict[str, Any]],
+) -> list[str]:
+    issues: list[str] = []
+    score_lookup = {str(trial["trial_id"]): trial for trial in scored_trials if "trial_id" in trial}
     for trial_id, verdict in eligibility_verdicts.items():
         scored = score_lookup.get(trial_id)
-        if not scored:
+        if scored is None:
             continue
 
-        if verdict.get("hard_exclusion_failures", 0) >= 2 and scored.get("score", 0.0) >= 0.7:
+        hard_failures = int(verdict.get("hard_exclusion_failures", 0))
+        score = float(scored.get("score", 0.0))
+        if hard_failures >= 2 and score >= 0.7:
             issues.append(
-                f"Inconsistency: {trial_id} has {verdict.get('hard_exclusion_failures', 0)} hard exclusion failures "
-                f"but score={scored.get('score', 0.0):.2f} (strong match tier). Score may be overestimated."
+                f"Inconsistency: {trial_id} has {hard_failures} hard exclusion failures "
+                f"but score={score:.2f} (strong match tier). Score may be overestimated."
             )
 
-        meets = verdict.get("meets_count", 0)
-        fails = verdict.get("fails_count", 0)
-        uncertain = verdict.get("uncertain_count", 0)
+        meets = int(verdict.get("meets_count", 0))
+        fails = int(verdict.get("fails_count", 0))
+        uncertain = int(verdict.get("uncertain_count", 0))
         total = meets + fails + uncertain
-        if total > 0 and uncertain == total and scored.get("confidence", 1.0) > 0.5:
+        confidence = float(scored.get("confidence", 1.0))
+        if total > 0 and uncertain == total and confidence > 0.5:
             issues.append(
-                f"Warning: {trial_id} has all UNCERTAIN verdicts but confidence={scored.get('confidence', 1.0):.2f}."
+                f"Warning: {trial_id} has all UNCERTAIN verdicts but confidence={confidence:.2f}."
             )
-
     return issues

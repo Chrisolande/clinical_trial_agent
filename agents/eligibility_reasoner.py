@@ -1,15 +1,16 @@
 import asyncio
+import json
 from typing import Any
 
 from config import get_llm
 from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
 from models.criteria import CriterionAssessment, EligibilityAssessmentList
-from prompts.eligibility import EVALUATION_PROMPT
+from prompts.eligibility import build_eligibility_prompt
 
 
 def _build_eligibility_chain(llm: Any) -> Any:
-    prompt = ChatPromptTemplate.from_template(EVALUATION_PROMPT)
+    prompt = ChatPromptTemplate.from_template(build_eligibility_prompt())
     structured_llm = llm.with_structured_output(EligibilityAssessmentList)
     return prompt | structured_llm
 
@@ -119,13 +120,50 @@ async def _invoke_eligibility_llm(chain: Any, inputs: dict[str, Any]) -> list[Cr
         raise ValueError(f"Unexpected eligibility result type: {type(result)}")
 
 
-def _assemble_verdict(crit: dict, llm_v: CriterionAssessment):
-    if not llm_v:
-        verdict = "UNCERTAIN"
-        justification = "LLM failed to return an assessment for this criterion."
-    else:
-        verdict = llm_v.verdict
-        justification = llm_v.justification
+def _derive_base_verdict(llm_v: CriterionAssessment | None) -> tuple[str, str]:
+    if llm_v is None:
+        return "UNCERTAIN", "LLM failed to return an assessment for this criterion."
+    return llm_v.verdict, llm_v.justification
+
+
+def _derive_defaults(verdict: str, is_hard_exclusion: bool) -> tuple[float, list[str]]:
+    if verdict == "FAILS":
+        flags = ["evidence_of_exclusion"]
+        if is_hard_exclusion:
+            return 0.0, [*flags, "hard_exclusion"]
+        return 0.2, flags
+    if verdict == "UNCERTAIN":
+        return 0.4, []
+    return 0.8, []
+
+
+def _parse_justification_payload(
+    justification: str,
+    match_score: float,
+    flags: list[str],
+) -> tuple[str, float, list[str]]:
+    try:
+        payload = json.loads(justification)
+    except json.JSONDecodeError:
+        return justification, match_score, flags
+    if not isinstance(payload, dict):
+        return justification, match_score, flags
+    rationale = str(payload.get("rationale", justification))
+    parsed_score = payload.get("match_score")
+    if isinstance(parsed_score, int | float):
+        match_score = max(0.0, min(1.0, float(parsed_score)))
+    parsed_flags = payload.get("flags")
+    if isinstance(parsed_flags, list):
+        flags = [str(flag) for flag in parsed_flags]
+    return rationale, match_score, flags
+
+
+def _assemble_verdict(crit: dict, llm_v: CriterionAssessment | None) -> dict[str, Any]:
+    verdict, justification = _derive_base_verdict(llm_v)
+    match_score, flags = _derive_defaults(verdict, bool(crit.get("is_hard_exclusion")))
+    justification, match_score, flags = _parse_justification_payload(
+        str(justification), match_score, flags
+    )
     return {
         "criterion_id": crit["criterion_id"],
         "criterion_text": crit["text"],
@@ -133,6 +171,8 @@ def _assemble_verdict(crit: dict, llm_v: CriterionAssessment):
         "verdict": verdict,
         "justification": justification,
         "is_hard_exclusion": crit.get("is_hard_exclusion", False),
+        "match_score": match_score,
+        "flags": flags,
         "confidence": 0.8 if verdict != "UNCERTAIN" else 0.4,
     }
 

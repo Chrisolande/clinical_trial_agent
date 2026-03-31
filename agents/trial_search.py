@@ -4,10 +4,8 @@ import asyncio
 import itertools
 from typing import Any
 
+from clinical_trials import search_trials
 from loguru import logger
-
-# Ensure this import matches the name of your tool file
-from tools.clinical_trial import search_trials
 
 
 async def _run_search_queries(
@@ -28,7 +26,7 @@ async def _run_search_queries(
     # 1. log any API Exceptions
     for i, res in enumerate(results):
         if isinstance(res, Exception):
-            logger.warning(f"Error in query {i}: {res}")
+            logger.warning("Error in query {}: {}", i, res)
 
     # 2. search_trials already parsed the data, so just flatten the studies
     flat_studies = itertools.chain.from_iterable(

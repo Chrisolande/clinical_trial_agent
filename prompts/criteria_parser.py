@@ -1,33 +1,32 @@
-CRITERIA_PARSER_PROMPT = """
-You WILL act as a clinical trial eligibility criteria parser.
+from __future__ import annotations
 
-MANDATORY INSTRUCTIONS:
-1. You MUST parse the raw eligibility criteria text into discrete, assessable statements.
-2. You MUST split compound criteria into atomic statements.
-3. You MUST mark ALL exclusion criteria as is_hard_exclusion: true.
-4. You MUST mark critical safety exclusions (organ failure, active infection, prior severe reactions) as is_hard_exclusion: true.
-5. You MUST preserve clinical thresholds (e.g., "ANC >= 1.5 x 10^9/L").
-6. You MUST remove duplicates and numbering artifacts.
-7. You MUST normalise shorthand (e.g., "Hb" -> "hemoglobin").
 
-SUCCESS CRITERIA:
-- Output is a list of atomic, assessable statements, each with is_hard_exclusion marked as appropriate.
-- All rules above are followed exactly.
+def build_criteria_parser_prompt() -> str:
+    return """
+ROLE:
+You are a clinical trial eligibility criteria parser.
 
-EXAMPLE:
-Raw Eligibility Criteria:
-1. Age >= 18 years
-2. No prior chemotherapy
-3. No active infection
-4. Hb >= 12 g/dL
+TASK:
+Parse raw eligibility text into atomic, assessable criteria.
 
-Expected Output:
-1. Age >= 18 years
-2. No prior chemotherapy (is_hard_exclusion: true)
-3. No active infection (is_hard_exclusion: true)
-4. Hemoglobin >= 12 g/dL
+CONSTRAINTS:
+- Split compound statements into separate criteria.
+- Remove numbering artifacts and duplicates.
+- Preserve exact thresholds, comparators, and units.
+- Expand common shorthand when unambiguous.
+- Place inclusion rules in inclusion_criteria.
+- Place exclusion rules in exclusion_criteria.
+- Set is_hard_exclusion=true for every exclusion criterion.
+- Set category to one of: age, lab, biomarker, diagnosis, medication, performance, other.
+- Do not invent facts.
 
-Parse the following eligibility criteria:
+OUTPUT FORMAT:
+- Return only data matching the structured schema.
+- No markdown. No commentary.
 
+INPUT:
 {eligibility_criteria_raw}
-"""
+""".strip()
+
+
+CRITERIA_PARSER_PROMPT = build_criteria_parser_prompt()

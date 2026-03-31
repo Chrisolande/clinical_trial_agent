@@ -7,16 +7,16 @@ from config import get_llm, settings
 from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
 from models.criteria import ParsedEligibilityCriterion
-from prompts.criteria_parser import CRITERIA_PARSER_PROMPT
+from prompts.criteria_parser import build_criteria_parser_prompt
 from tools import cache
 from tools.retry import llm_retry
 
 
-async def parse_eligibility_criteria(eligibility_text: str, nct_id: str):
+async def parse_eligibility_criteria(eligibility_text: str, nct_id: str) -> dict[str, Any]:
     if not eligibility_text or len(eligibility_text) < 20:
         return {"inclusion_criteria": [], "exclusion_criteria": []}
 
-    prompt = ChatPromptTemplate.from_template(CRITERIA_PARSER_PROMPT)
+    prompt = ChatPromptTemplate.from_template(build_criteria_parser_prompt())
     structured_llm = get_llm().with_structured_output(ParsedEligibilityCriterion)
 
     chain = prompt | structured_llm
@@ -44,7 +44,7 @@ async def parse_eligibility_criteria(eligibility_text: str, nct_id: str):
 
 
 @llm_retry
-async def _invoke_criteria_llm(chain: Any, inputs: dict[str, Any]):
+async def _invoke_criteria_llm(chain: Any, inputs: dict[str, Any]) -> ParsedEligibilityCriterion:
     async with asyncio.Semaphore(10):
         result = await chain.ainvoke(
             inputs,

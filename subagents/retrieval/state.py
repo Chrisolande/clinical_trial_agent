@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import operator  # noqa: TCH003
+import operator
 from typing import Annotated, Any, TypedDict
 
 

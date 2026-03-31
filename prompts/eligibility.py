@@ -1,43 +1,38 @@
-EVALUATION_PROMPT = """
-You WILL act as an expert clinical trial eligibility assessor.
+from __future__ import annotations
 
-MANDATORY INSTRUCTIONS:
-1. For each eligibility criterion, you MUST assign one of the following verdicts:
-	- MEETS: Patient clearly meets this criterion based on available information.
-	- FAILS: Patient clearly does not meet this criterion based on positive evidence.
-	- UNCERTAIN: Information needed to assess this criterion is absent, OR it cannot be determined.
-2. You MUST use UNCERTAIN (not FAILS) when a lab value, biomarker, or prior treatment is not explicitly mentioned in the patient profile.
-3. You MUST be conservative: if patient data is insufficient, you WILL prefer UNCERTAIN over FAILS unless there is clear evidence of disqualification.
-4. You MUST use FAILS only when there is definitive proof the patient violates the criterion.
-5. You MUST be strict with hard exclusions: if an exclusion criterion is marked 'is_hard_exclusion=True' and the patient has that condition, you MUST mark FAILS.
 
-SUCCESS CRITERIA:
-- Each criterion is assessed with a single verdict (MEETS, FAILS, or UNCERTAIN).
-- All rules above are followed exactly.
+def build_eligibility_prompt() -> str:
+    return """
+ROLE:
+You are an expert clinical trial eligibility assessor.
 
-EXAMPLE:
-Patient Profile:
-Name: John Doe
-Age: 62
-Diagnosis: NSCLC
-Lab: Hemoglobin 13.2 g/dL
-Prior treatments: None
+TASK:
+Assess each criterion against the patient profile.
 
-Criteria to Assess:
-1. Age >= 18
-2. Diagnosis of non-small cell lung carcinoma (NSCLC)
-3. Hemoglobin >= 12 g/dL
-4. No prior chemotherapy (is_hard_exclusion=True)
+CONSTRAINTS:
+- Evaluate every input criterion_id exactly once.
+- Allowed verdict values: MEETS, FAILS, UNCERTAIN.
+- Use FAILS only with explicit contradictory evidence.
+- Use UNCERTAIN when required information is missing or ambiguous.
+- For criteria marked is_hard_exclusion=true, if evidence confirms presence then verdict=FAILS.
+- Keep rationale <= 80 words.
+- Set match_score as a float in [0.0, 1.0].
+- Set flags as a list of short tags.
+- Compatibility rule: schema supports only criterion_id, verdict, justification.
+- Therefore justification MUST be compact JSON with keys: rationale, match_score, flags.
+- Do not add criteria. Do not guess unstated facts.
 
-Expected Output:
-1. MEETS
-2. MEETS
-3. MEETS
-4. MEETS
+OUTPUT FORMAT:
+- Return only data matching the structured schema.
+- Deterministic style: concise, evidence-based, no filler.
+- No markdown. No commentary.
 
-Patient Profile:
+PATIENT PROFILE:
 {patient_profile}
 
-Criteria to Assess:
+CRITERIA:
 {criteria_list}
-"""
+""".strip()
+
+
+EVALUATION_PROMPT = build_eligibility_prompt()

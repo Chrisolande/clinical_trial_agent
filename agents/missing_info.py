@@ -8,14 +8,14 @@ from config import get_llm
 from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
 from models.missing_info import CompletenessAssessment, CompletenessAssessmentList
-from prompts.missinginfo import COMPLETENESS_PROMPT
+from prompts.missinginfo import build_missing_info_prompt
 from tools.retry import llm_retry
 
 
-def _get_chain():
-    return ChatPromptTemplate.from_template(COMPLETENESS_PROMPT) | get_llm().with_structured_output(
-        CompletenessAssessmentList
-    )
+def _get_chain() -> Any:
+    return ChatPromptTemplate.from_template(
+        build_missing_info_prompt()
+    ) | get_llm().with_structured_output(CompletenessAssessmentList)
 
 
 def _build_uncertain_summary(

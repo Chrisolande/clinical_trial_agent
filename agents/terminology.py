@@ -6,12 +6,11 @@ from config import get_llm
 from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
 from models.terminology import NormalisedTerminology
-from prompts.terminology import TERMINOLOGY_NORMALISATION_PROMPT
-
-from clinical_trial_agent.tools.retry import llm_retry
+from prompts.terminology import build_terminology_prompt
+from tools.retry import llm_retry
 
 _chain = ChatPromptTemplate.from_template(
-    TERMINOLOGY_NORMALISATION_PROMPT
+    build_terminology_prompt()
 ) | get_llm().with_structured_output(NormalisedTerminology)
 
 
@@ -58,7 +57,7 @@ async def _invoke_terminology_llm(
     )
 
 
-async def normalize_terminology(patient_profile: dict) -> dict:
+async def normalize_terminology(patient_profile: dict) -> dict[str, object]:
     conditions, medications = _prepare_terminology_inputs(patient_profile)
     if not conditions and not medications:
         return _fallback_terminology([], [])

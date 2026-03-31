@@ -2,17 +2,16 @@ from __future__ import annotations
 
 from typing import Any
 
-# Add the project root to the Python path
-# project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-# if project_root not in sys.path:
-#     sys.path.insert(0, project_root)
 from config import get_llm
+from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
 from models.patient import ExtractedPatientProfile
-from prompts.patient_extraction import PATIENT_EXTRACTION_PROMPT
+from prompts.patient_extraction import build_patient_extraction_prompt
 from tools.retry import llm_retry
 
-chain = PATIENT_EXTRACTION_PROMPT | get_llm().with_structured_output(ExtractedPatientProfile)
+chain = ChatPromptTemplate.from_template(
+    build_patient_extraction_prompt()
+) | get_llm().with_structured_output(ExtractedPatientProfile)
 
 
 @llm_retry
