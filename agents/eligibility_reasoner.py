@@ -2,7 +2,7 @@ import asyncio
 import json
 from typing import Any
 
-from config import get_llm
+from config import get_llm, settings
 from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
 from models.criteria import CriterionAssessment, EligibilityAssessmentList
@@ -107,17 +107,19 @@ def _format_criteria_batch(criteria: list[dict[str, Any]]) -> str:
 
 
 async def _invoke_eligibility_llm(chain: Any, inputs: dict[str, Any]) -> list[CriterionAssessment]:
-    async with asyncio.Semaphore(10):
-        result = await chain.ainvoke(
+    result = await asyncio.wait_for(
+        chain.ainvoke(
             inputs,
             config={
                 "run_name": "eligibility_reasoning",
                 "tags": ["eligibility", "verdict"],
             },
-        )
-        if isinstance(result, EligibilityAssessmentList):
-            return result.results
-        raise ValueError(f"Unexpected eligibility result type: {type(result)}")
+        ),
+        timeout=settings.llm_call_timeout_seconds,
+    )
+    if isinstance(result, EligibilityAssessmentList):
+        return result.results
+    raise ValueError(f"Unexpected eligibility result type: {type(result)}")
 
 
 def _derive_base_verdict(llm_v: CriterionAssessment | None) -> tuple[str, str]:
@@ -208,7 +210,7 @@ async def assess_patient_eligibility(
     try:
         raw_verdicts = await _invoke_eligibility_llm(chain, inputs)
     except Exception as e:
-        logger.warning("Failed to assess eligibility: %s", e)
+        logger.warning("Failed to assess eligibility: {}", e)
         raw_verdicts = []
 
     final_verdicts = _build_verdicts(criteria, raw_verdicts)

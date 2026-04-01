@@ -6,6 +6,7 @@ from typing import Any, ParamSpec, TypeVar, cast
 
 import httpx
 from config import settings
+from loguru import logger
 from tenacity import (
     RetryError,
     before_sleep_log,
@@ -25,7 +26,21 @@ _TRANSIENT_LLM_ERRORS = (TimeoutError, ConnectionError)
 _TRANSIENT_HTTP_ERRORS = (httpx.HTTPStatusError, httpx.RequestError)
 
 
+class _LoguruLoggingHandler(logging.Handler):
+    def emit(self, record: logging.LogRecord) -> None:
+        logger.opt(exception=record.exc_info, depth=6).log(record.levelname, record.getMessage())
+
+
+def _ensure_tenacity_logger_bridge() -> None:
+    if not any(isinstance(handler, _LoguruLoggingHandler) for handler in std_logger.handlers):
+        std_logger.handlers.clear()
+        std_logger.addHandler(_LoguruLoggingHandler())
+        std_logger.propagate = False
+    std_logger.setLevel(getattr(logging, settings.log_level, logging.INFO))
+
+
 def _base_retry(retry_condition: Any) -> Any:
+    _ensure_tenacity_logger_bridge()
     return retry(
         stop=stop_after_attempt(settings.retry_max_attempts),
         wait=wait_exponential_jitter(

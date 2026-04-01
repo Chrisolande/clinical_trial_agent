@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import inspect
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -50,6 +52,18 @@ class SupervisorOrchestrator:
         retry_count: int = 0,
         thread_id: str | None = None,
     ) -> dict[str, Any]:
+        """
+        Run retrieval to fetch relevant trials for the given patient.
+
+        Args:
+            patient_profile: A dictionary containing the patient's summary.
+            normalized_terms: A dictionary containing the normalized search terms.
+            retry_count: An integer indicating the number of times the retrieval should be retried.
+            thread_id: A string indicating the thread the retrieval is running on.
+
+        Returns:
+            A dictionary containing the results of the retrieval.
+        """
         retrieval_input = {
             "normalized_terms": normalized_terms or {},
             "patient_profile": patient_profile,
@@ -70,6 +84,19 @@ class SupervisorOrchestrator:
         thread_id: str | None = None,
         attempt: int = 0,
     ) -> dict[str, Any]:
+        """
+        Run eligibility to determine whether the given trials are eligible for the given patient.
+
+        Args:
+            patient_profile: A dictionary containing the patient's summary.
+            trials_deduplicated: A list of dictionaries containing the deduplicated trials.
+            eligibility_verdicts: A dictionary containing the eligibility verdicts.
+            thread_id: A string indicating the thread the eligibility is running on.
+            attempt: An integer indicating the number of times the eligibility should be retried.
+
+        Returns:
+            A dictionary containing the results of the eligibility.
+        """
         trimmed_trials = []
         for trial in trials_deduplicated:
             criteria_text = str(trial.get("eligibility_criteria_raw", ""))
@@ -79,7 +106,7 @@ class SupervisorOrchestrator:
                     "eligibility_criteria_raw": criteria_text[: settings.criteria_text_max_chars],
                 }
             )
-        eligibility_graph = compile_eligibility_graph(use_postgres_checkpointer=True)
+        eligibility_graph = compile_eligibility_graph(use_postgres_checkpointer=False)
         eligibility_input = {
             "patient_profile": patient_profile,
             "trials_deduplicated": trimmed_trials,
@@ -103,6 +130,23 @@ class SupervisorOrchestrator:
         trials_with_criteria: list[dict[str, Any]] | None = None,
         thread_id: str | None = None,
     ) -> dict[str, Any]:
+        """
+        Run synthesis synthesis to generate a report based on the given trial scores and eligibility verdicts.
+
+        Args:
+            patient_profile: A dictionary containing the patient's summary.
+            trial_scores: A list of dictionaries containing the trial scores.
+            eligibility_verdicts: A dictionary containing the eligibility verdicts.
+            missing_info_recommendations: A list of dictionaries containing the missing information recommendations.
+            trials_raw: A list of dictionaries containing the raw trials.
+            search_queries: A list of strings containing the search queries used.
+            decision_history: A list of strings containing the decision history.
+            trials_with_criteria: A list of dictionaries containing the trials with criteria.
+            thread_id: A string indicating the thread the synthesis synthesis is running on.
+
+        Returns:
+            A dictionary containing the results of the synthesis.
+        """
         synthesis_input = {
             "patient_profile": patient_profile,
             "trial_scores": trial_scores,
@@ -152,10 +196,24 @@ class SupervisorOrchestrator:
             "configurable": {"thread_id": thread_id},
             "recursion_limit": recursion_limit,
         }
-
-        result = await self._react_agent.ainvoke(agent_input, config=config)
-        normalized = self._extract_final_result(result)
-        if "report_json" not in normalized and "report_text" in normalized:
+        if settings.supervisor_use_react:
+            try:
+                result = await asyncio.wait_for(
+                    self._react_agent.ainvoke(agent_input, config=config),
+                    timeout=settings.supervisor_agent_timeout_seconds,
+                )
+                normalized = self._extract_final_result(result)
+                if "report_json" not in normalized and "report_text" in normalized:
+                    normalized = await self._run_tools_pipeline(
+                        patient_summary, thread_id=thread_id
+                    )
+            except TimeoutError:
+                logger.warning(
+                    "Supervisor ReAct agent timed out after {}s; using deterministic pipeline",
+                    settings.supervisor_agent_timeout_seconds,
+                )
+                normalized = await self._run_tools_pipeline(patient_summary, thread_id=thread_id)
+        else:
             normalized = await self._run_tools_pipeline(patient_summary, thread_id=thread_id)
 
         memory = EpisodicMemory()
@@ -182,7 +240,7 @@ class SupervisorOrchestrator:
             )
             run_state.retrieval_result = self._compress_retrieval_output(raw_retrieval)
             trials_for_eligibility = run_state.retrieval_result.get("trials_deduplicated", [])
-            limited_trials = list(trials_for_eligibility)[: settings.max_trials_per_query]
+            limited_trials = list(trials_for_eligibility)[: settings.max_trials_for_eligibility]
 
             eligibility = await self.run_eligibility(
                 patient_profile=patient_profile,
@@ -326,6 +384,13 @@ async def compile_supervisor_graph() -> Any:
     checkpointer = get_checkpointer(settings.database_uri)
     if checkpointer is not None and hasattr(checkpointer, "__aenter__"):
         async with checkpointer as active_checkpointer:
+            setup_result = active_checkpointer.setup()
+            if inspect.isawaitable(setup_result):
+                await setup_result
             yield SupervisorOrchestrator(checkpointer=active_checkpointer)
     else:
+        if checkpointer is not None and hasattr(checkpointer, "setup"):
+            setup_result = checkpointer.setup()
+            if inspect.isawaitable(setup_result):
+                await setup_result
         yield SupervisorOrchestrator(checkpointer=checkpointer)

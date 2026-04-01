@@ -42,11 +42,12 @@ pip install -e ".[dev]"
 Set environment variables (in shell or `.env`):
 
 ```bash
-LLM_PROVIDER=gemini # or openai / auto
-GEMINI_API_KEY=...
-OPENAI_API_KEY=...
+DEEPSEEK_API_KEY=...
 DATABASE_URI=postgresql://postgres:postgres@localhost:5432/postgres
 MEMORY_DB_DSN=postgresql://postgres:postgres@localhost:5432/postgres
+LLM_CALL_TIMEOUT_SECONDS=20
+RETRIEVAL_INTERNAL_MAX_RETRIES=1
+MAX_TRIALS_FOR_ELIGIBILITY=10
 ```
 
 > [!IMPORTANT]

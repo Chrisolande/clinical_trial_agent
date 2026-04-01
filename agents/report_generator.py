@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 from collections import Counter
 from datetime import UTC, datetime
 from typing import Any
 
-from config import get_llm
+from config import get_llm, settings
 from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
 from prompts.synthesis import build_synthesis_prompt
@@ -60,9 +61,12 @@ def _build_exec_summary_context(
 
 @llm_retry
 async def _invoke_exec_summary_llm(chain: Any, context: dict[str, Any]) -> dict[str, Any]:
-    result = await chain.ainvoke(
-        context,
-        config={"run_name": "executive_summary", "tags": ["synthesis", "report"]},
+    result = await asyncio.wait_for(
+        chain.ainvoke(
+            context,
+            config={"run_name": "executive_summary", "tags": ["synthesis", "report"]},
+        ),
+        timeout=settings.llm_call_timeout_seconds,
     )
     if not isinstance(result, ExecutiveSummaryModel):
         raise ValueError(f"Unexpected report summary result type: {type(result)}")

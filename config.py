@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from langchain_openai import ChatOpenAI
+from langchain_deepseek import ChatDeepSeek
 from pydantic import SecretStr
 
 _DEFAULT_DB_URI = "postgresql://postgres:postgres@localhost:5432/postgres"
@@ -51,12 +51,8 @@ def bootstrap_environment(*, load_local_env: bool = True) -> None:
 
 @dataclass(frozen=True)
 class Settings:
-    llm_provider: str
-    gemini_api_key: str
-    gemini_model: str
-    openai_api_key: str
-    openai_model: str
-    openai_base_url: str
+    deepseek_api_key: str
+    deepseek_model: str
     retry_max_attempts: int
     retry_min_wait_seconds: float
     retry_max_wait_seconds: float
@@ -77,6 +73,11 @@ class Settings:
     cache_dir: str
     memory_ttl_days: int
     log_level: str
+    supervisor_use_react: bool
+    supervisor_agent_timeout_seconds: float
+    llm_call_timeout_seconds: float
+    retrieval_internal_max_retries: int
+    max_trials_for_eligibility: int
     max_retry_attempts: int = 5
 
 
@@ -85,12 +86,8 @@ def load_settings() -> Settings:
     database_uri = os.getenv("DATABASE_URI", _DEFAULT_DB_URI)
     memory_dsn = os.getenv("MEMORY_DB_DSN", database_uri)
     return Settings(
-        llm_provider=os.getenv("LLM_PROVIDER", "gemini").strip().lower(),
-        gemini_api_key=(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""),
-        gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
-        openai_api_key=os.getenv("OPENAI_API_KEY", ""),
-        openai_model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-        openai_base_url=os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1"),
+        deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
+        deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
         retry_max_attempts=int(os.getenv("RETRY_MAX_ATTEMPTS", "3")),
         retry_min_wait_seconds=float(os.getenv("RETRY_MIN_WAIT_SECONDS", "1.0")),
         retry_max_wait_seconds=float(os.getenv("RETRY_MAX_WAIT_SECONDS", "30.0")),
@@ -111,6 +108,16 @@ def load_settings() -> Settings:
         cache_dir=os.getenv("CACHE_DIR", "/tmp/clinical_trial_cache"),
         memory_ttl_days=int(os.getenv("MEMORY_TTL_DAYS", "30")),
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
+        supervisor_use_react=_as_bool(os.getenv("SUPERVISOR_USE_REACT"), default=False),
+        supervisor_agent_timeout_seconds=float(os.getenv("SUPERVISOR_AGENT_TIMEOUT_SECONDS", "45")),
+        llm_call_timeout_seconds=float(os.getenv("LLM_CALL_TIMEOUT_SECONDS", "20")),
+        retrieval_internal_max_retries=int(os.getenv("RETRIEVAL_INTERNAL_MAX_RETRIES", "1")),
+        max_trials_for_eligibility=int(
+            os.getenv(
+                "MAX_TRIALS_FOR_ELIGIBILITY",
+                os.getenv("MAX_TRIALS_PER_QUERY", "10"),
+            )
+        ),
     )
 
 
@@ -118,35 +125,10 @@ settings = load_settings()
 
 
 def get_llm() -> Any:
-    provider = settings.llm_provider
-
-    if provider in {"gemini", "auto"}:
-        if settings.gemini_api_key:
-            try:
-                from langchain_google_genai import ChatGoogleGenerativeAI
-            except ImportError as exc:
-                if provider == "gemini":
-                    raise RuntimeError(
-                        "LLM_PROVIDER=gemini requires langchain-google-genai. "
-                        "Install it with: pip install langchain-google-genai"
-                    ) from exc
-            else:
-                return ChatGoogleGenerativeAI(
-                    model=settings.gemini_model,
-                    temperature=0.0,
-                    google_api_key=settings.gemini_api_key,
-                )
-        elif provider == "gemini":
-            raise RuntimeError("LLM_PROVIDER=gemini requires GEMINI_API_KEY or GOOGLE_API_KEY.")
-
-    if provider not in {"openai", "auto", "gemini"}:
-        raise ValueError(f"Unsupported LLM_PROVIDER={provider!r}. Use gemini, openai, or auto.")
-
-    if not settings.openai_api_key:
-        raise RuntimeError("OPENAI_API_KEY is required when using the OpenAI provider.")
-    return ChatOpenAI(
-        model=settings.openai_model,
-        base_url=settings.openai_base_url,
+    if not settings.deepseek_api_key:
+        raise RuntimeError("DEEPSEEK_API_KEY is required.")
+    return ChatDeepSeek(
+        model=settings.deepseek_model,
         temperature=0.0,
-        api_key=SecretStr(settings.openai_api_key),
+        api_key=SecretStr(settings.deepseek_api_key),
     )

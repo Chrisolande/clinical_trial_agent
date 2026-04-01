@@ -1,0 +1,12 @@
+{
+    "age": 62,
+    "sex": "male",
+    "primary_condition": "non-small cell lung cancer",
+    "stage": "IV",
+    "medications": [
+        "pembrolizumab"
+    ],
+    "biomarkers": [
+        "PD-L1 high"
+    ]
+}

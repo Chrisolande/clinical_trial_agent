@@ -3,9 +3,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from config import bootstrap_environment, settings
+from config import bootstrap_environment
 from langgraph.graph import END, START, StateGraph
-from memory import get_checkpointer
 
 from .nodes import (
     aggregate_results,
@@ -56,11 +55,9 @@ def compile_eligibility_graph(*, use_postgres_checkpointer: bool = True) -> Any:
     graph = _build_eligibility_graph()
     if not use_postgres_checkpointer:
         return graph.compile()
-
-    checkpointer = get_checkpointer(settings.database_uri)
-    if checkpointer is None:
-        return graph.compile()
-    return graph.compile(checkpointer=checkpointer)
+    # Disabled for now: this graph is compiled repeatedly inside the supervisor.
+    # Reusing the supervisor-level checkpointer avoids duplicate setup/teardown paths.
+    return graph.compile()
 
 
 if __name__ == "__main__":

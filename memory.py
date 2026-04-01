@@ -5,15 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+import asyncpg
 from config import settings
 from loguru import logger
 from tools.postgres_base import PostgresBase
-
-if TYPE_CHECKING:
-    import asyncpg
-
 
 _DDL = """
 
@@ -87,9 +84,25 @@ class EpisodicMemory(PostgresBase):
                 now,
             )
         if row:
-            logger.info("Episodic memory hit", profile_hash=key[:8])
             raw = row["result_json"]
-            return raw if isinstance(raw, dict) else None
+            if isinstance(raw, dict):
+                logger.info("Episodic memory hit", profile_hash=key[:8])
+                return raw
+            if isinstance(raw, str):
+                try:
+                    parsed = json.loads(raw)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "Episodic memory payload string was not valid JSON; ignoring cache entry"
+                    )
+                else:
+                    if isinstance(parsed, dict):
+                        logger.info("Episodic memory hit", profile_hash=key[:8])
+                        return parsed
+            logger.warning(
+                "Episodic memory payload had unexpected type {}; ignoring cache entry",
+                type(raw).__name__,
+            )
         logger.debug("Episodic memory miss", profile_hash=key[:8])
         return None
 

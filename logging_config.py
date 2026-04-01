@@ -31,7 +31,6 @@ def configure_logging() -> None:
         for noisy in (
             "httpx",
             "httpcore",
-            "openai._base_client",
             "langchain",
             "langgraph",
         ):

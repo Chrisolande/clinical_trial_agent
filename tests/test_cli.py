@@ -117,9 +117,10 @@ def test_validate_env_command(monkeypatch: pytest.MonkeyPatch) -> None:
     class DummyEnv:
         database_uri = "postgres://x"
         memory_db_dsn = "postgres://x"
-        llm_provider = "openai"
-        gemini_ready = False
-        openai_ready = True
+        deepseek_ready = True
+        llm_call_timeout_seconds = 20.0
+        retrieval_internal_max_retries = 1
+        max_trials_for_eligibility = 10
 
     monkeypatch.setattr(cli, "validate_or_raise", lambda: DummyEnv())
     result = runner.invoke(cli.app, ["validate-env"])

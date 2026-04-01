@@ -45,11 +45,13 @@ async def parse_eligibility_criteria(eligibility_text: str, nct_id: str) -> dict
 
 @llm_retry
 async def _invoke_criteria_llm(chain: Any, inputs: dict[str, Any]) -> ParsedEligibilityCriterion:
-    async with asyncio.Semaphore(10):
-        result = await chain.ainvoke(
+    result = await asyncio.wait_for(
+        chain.ainvoke(
             inputs,
             config={"run_name": "criteria_parse", "tags": ["eligibility", "parse"]},
-        )
+        ),
+        timeout=settings.llm_call_timeout_seconds,
+    )
     if not result:
         raise ValueError(f"Unexpected criteria parser result type: {type(result)}")
     return cast("ParsedEligibilityCriterion", result)

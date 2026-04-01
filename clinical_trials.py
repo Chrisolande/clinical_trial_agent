@@ -42,6 +42,11 @@ class FetchTrialDetailOutput(BaseModel):
     error: ToolError | None = None
 
 
+def _studies_endpoint_url(base_url: str) -> str:
+    normalized = base_url.rstrip("/")
+    return normalized if normalized.endswith("/studies") else f"{normalized}/studies"
+
+
 def _urllib_get_json(url: str, params: dict[str, Any], timeout: float = 30.0) -> dict[str, Any]:
     query = urlencode(params, doseq=True)
     full_url = f"{url}?{query}" if query else url
@@ -163,8 +168,11 @@ async def search_trials(
         params["filter.overallStatus"] = "|".join(validated.status)
 
     try:
-        data = await _ctgov_request_with_retry(settings.ctgov_base_url, params)
-        studies = cast("list[dict[str, Any]]", data.get("studies", []))
+        data = await _ctgov_request_with_retry(
+            _studies_endpoint_url(settings.ctgov_base_url), params
+        )
+        studies_raw = cast("list[dict[str, Any]]", data.get("studies", []))
+        studies = [parse_trial_from_response(study) for study in studies_raw]
         return SearchTrialsOutput(studies=studies).model_dump()
     except Exception as exc:
         return SearchTrialsOutput(
@@ -178,7 +186,7 @@ async def search_trials(
 
 async def fetch_trial_detail(nct_id: str) -> dict[str, Any]:
     """Fetch a single trial by NCT ID."""
-    url = f"{settings.ctgov_base_url}/{nct_id}"
+    url = f"{_studies_endpoint_url(settings.ctgov_base_url)}/{nct_id}"
     try:
         data = await _ctgov_request_with_retry(url, {"format": "json"})
         return FetchTrialDetailOutput(trial=parse_trial_from_response(data)).model_dump()

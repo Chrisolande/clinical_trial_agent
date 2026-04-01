@@ -110,7 +110,10 @@ def should_retry_search(state: RetrievalState) -> str:
     existing_ids = set(state.get("existing_nct_ids") or [])
 
     unique_new_count = len(_get_new_unique_trials(fetched, existing_ids))
-    if unique_new_count < 3 and state.get("internal_retry_count", 0) < 2:
+    if (
+        unique_new_count < 3
+        and state.get("internal_retry_count", 0) < settings.retrieval_internal_max_retries
+    ):
         return "retry_search"
     return "finalize"
 
