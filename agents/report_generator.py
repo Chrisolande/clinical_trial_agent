@@ -59,7 +59,7 @@ def _build_exec_summary_context(
 
 
 @llm_retry
-async def _invoke_exec_summary_llm(chain, context):
+async def _invoke_exec_summary_llm(chain: Any, context: dict[str, Any]) -> dict[str, Any]:
     result = await chain.ainvoke(
         context,
         config={"run_name": "executive_summary", "tags": ["synthesis", "report"]},
@@ -98,7 +98,9 @@ async def generate_executive_summary(
     }
 
 
-def _build_trial_report_entry(trial, eligibility_verdicts):
+def _build_trial_report_entry(
+    trial: dict[str, Any], eligibility_verdicts: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
     tid = trial.get("trial_id", "")
     enriched = dict(trial)
     enriched["verdict_details"] = eligibility_verdicts.get(tid, {})
@@ -114,15 +116,15 @@ _METHODOLOGY_NOTE = (
 
 
 async def build_report(
-    patient_profile,
-    scored_trials,
-    missing_info,
-    eligibility_verdicts,
-    trials_raw,
-    search_queries,
-    decision_history,
-    qa_issues,
-):
+    patient_profile: dict[str, Any],
+    scored_trials: list[dict[str, Any]],
+    missing_info: list[dict[str, Any]],
+    eligibility_verdicts: dict[str, dict[str, Any]],
+    trials_raw: list[dict[str, Any]],
+    search_queries: list[str],
+    decision_history: list[str],
+    qa_issues: list[str],
+) -> dict[str, Any]:
     summary_data = await generate_executive_summary(patient_profile, scored_trials, missing_info)
     enriched_trials = [_build_trial_report_entry(t, eligibility_verdicts) for t in scored_trials]
     return {
@@ -162,7 +164,7 @@ def _render_trial_entry(t: dict[str, Any]) -> list[str]:
     return lines
 
 
-def _render_tier_section(report_json, tier, label):
+def _render_tier_section(report_json: dict[str, Any], tier: str, label: str) -> list[str]:
     trials = report_json.get(tier, [])
     if not trials:
         return []

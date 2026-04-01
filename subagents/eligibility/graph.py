@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 from config import bootstrap_environment, settings
 from langgraph.graph import END, START, StateGraph
@@ -51,7 +52,7 @@ def _build_eligibility_graph() -> StateGraph:
     return graph
 
 
-def compile_eligibility_graph(*, use_postgres_checkpointer: bool = True):
+def compile_eligibility_graph(*, use_postgres_checkpointer: bool = True) -> Any:
     graph = _build_eligibility_graph()
     if not use_postgres_checkpointer:
         return graph.compile()

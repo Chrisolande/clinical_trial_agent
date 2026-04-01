@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, cast
 
 from config import get_llm, settings
 from langchain_core.prompts import ChatPromptTemplate
@@ -52,7 +52,7 @@ async def _invoke_criteria_llm(chain: Any, inputs: dict[str, Any]) -> ParsedElig
         )
     if not result:
         raise ValueError(f"Unexpected criteria parser result type: {type(result)}")
-    return result
+    return cast("ParsedEligibilityCriterion", result)
 
 
 def _assign_ids(

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from agents.supervisor import compile_supervisor_graph
 from async_typer import AsyncTyper
@@ -23,7 +23,7 @@ console = Console()
 
 def _load_json(path: Path) -> dict[str, Any]:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return cast("dict[str, Any]", json.loads(path.read_text(encoding="utf-8")))
     except Exception as exc:
         raise RuntimeError(f"Failed to load JSON from {path}: {exc}") from exc
 

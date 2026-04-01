@@ -9,10 +9,15 @@ from loguru import logger
 from .state import RetrievalState  # noqa: TCH001
 
 
-def _get_new_unique_trials(fetched, existing_ids):
+def _get_new_unique_trials(
+    fetched: list[dict[str, Any]], existing_ids: set[str] | list[str]
+) -> list[dict[str, Any]]:
+    existing = set(existing_ids)
     return list(
         {
-            nct_id: t for t in fetched if (nct_id := t.get("nct_id")) and nct_id not in existing_ids
+            str(nct_id): t
+            for t in fetched
+            if (nct_id := t.get("nct_id")) and str(nct_id) not in existing
         }.values()
     )
 
@@ -55,7 +60,7 @@ async def initialize_retrieval(state: RetrievalState) -> dict[str, Any]:
     }
 
 
-async def execute_searches(state: RetrievalState):
+async def execute_searches(state: RetrievalState) -> dict[str, Any]:
     """Execute all queries against ClinicalTrials.gov"""
     queries = state.get("current_queries", [])
 
@@ -78,7 +83,7 @@ async def execute_searches(state: RetrievalState):
         }
 
 
-async def assess_and_finalize(state: RetrievalState):
+async def assess_and_finalize(state: RetrievalState) -> dict[str, Any]:
     """Build final output for the soupervisor"""
 
     fetched = state.get("fetched_trials") or []
@@ -99,7 +104,7 @@ async def assess_and_finalize(state: RetrievalState):
     }
 
 
-def should_retry_search(state: RetrievalState):
+def should_retry_search(state: RetrievalState) -> str:
     """Route: if too few unique new results and internal retries available, try again."""
     fetched = state.get("fetched_trials") or []
     existing_ids = set(state.get("existing_nct_ids") or [])
@@ -110,7 +115,7 @@ def should_retry_search(state: RetrievalState):
     return "finalize"
 
 
-async def broaden_and_retry(state: RetrievalState):
+async def broaden_and_retry(state: RetrievalState) -> dict[str, Any]:
     """Broaden search parameters and re-prepare queries for retry"""
     internal_retry = state.get("internal_retry_count", 0)
     strategy = search_refiner.refine_search_strategy(

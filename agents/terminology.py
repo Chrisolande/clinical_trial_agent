@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 from config import get_llm
 from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
@@ -48,16 +50,17 @@ def _format_terms(conditions: list[str], medications: list[str]) -> str:
 async def _invoke_terminology_llm(
     conditions: list[str], medications: list[str]
 ) -> NormalisedTerminology:
-    return await _chain.ainvoke(
+    result = await _chain.ainvoke(
         {"terms": _format_terms(conditions, medications)},
         config={
             "run_name": "terminology_normalize",
             "tags": ["supervisor", "terminology"],
         },
     )
+    return cast("NormalisedTerminology", result)
 
 
-async def normalize_terminology(patient_profile: dict) -> dict[str, object]:
+async def normalize_terminology(patient_profile: dict[str, Any]) -> dict[str, object]:
     conditions, medications = _prepare_terminology_inputs(patient_profile)
     if not conditions and not medications:
         return _fallback_terminology([], [])

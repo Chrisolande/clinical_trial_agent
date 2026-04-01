@@ -59,14 +59,14 @@ def _wilson_ci(successes: int, total: int, hard_fails: int = 0) -> tuple[float, 
 
 def _compute_score_confidence(
     meets: int, soft_fails: int, hard_fails: int, uncertain: int, total: int
-):
+) -> tuple[float, float]:
     known = meets + soft_fails + hard_fails
     score = 0.5 if known == 0 else (meets / known) + (hard_fails * HARD_EXCLUSION_WEIGHT)
     confidence = max(0.1, min(1.0, known / total)) if total > 0 else 0.1
     return round(max(0.0, min(1.0, score)), 4), round(confidence, 4)
 
 
-def _collect_verdict_keys(verdicts: list[dict]) -> tuple[list, list, list]:
+def _collect_verdict_keys(verdicts: list[dict[str, Any]]) -> tuple[list[str], list[str], list[str]]:
     inc_passed = [
         v["criterion_text"]
         for v in verdicts
@@ -77,7 +77,7 @@ def _collect_verdict_keys(verdicts: list[dict]) -> tuple[list, list, list]:
     return inc_passed, exc_failed, uncertain
 
 
-def _format_locations(trial: dict) -> list[str]:
+def _format_locations(trial: dict[str, Any]) -> list[str]:
     return [
         f"{loc.get('city', '')}, {loc.get('country', '')}".strip(", ")
         for loc in trial.get("locations", [])[:3]
@@ -85,19 +85,23 @@ def _format_locations(trial: dict) -> list[str]:
     ]
 
 
-def _build_trial_lookup(trials_with_criteria: list, trials_raw: list | None) -> dict:
-    lookup = {}
+def _build_trial_lookup(
+    trials_with_criteria: list[dict[str, Any]], trials_raw: list[dict[str, Any]] | None
+) -> dict[str, dict[str, Any]]:
+    lookup: dict[str, dict[str, Any]] = {}
     for twc in trials_with_criteria:
         if nct_id := twc.get("trial", {}).get("nct_id"):
-            lookup[nct_id] = twc.get("trial")
+            trial_value = twc.get("trial")
+            if isinstance(trial_value, dict):
+                lookup[str(nct_id)] = trial_value
 
     for trial in trials_raw or []:
         if (nct_id := trial.get("nct_id")) and nct_id not in lookup:
-            lookup[nct_id] = trial
+            lookup[str(nct_id)] = trial
     return lookup
 
 
-def score_trial(eligibility_result: dict, trial_data: dict) -> dict[str, Any]:
+def score_trial(eligibility_result: dict[str, Any], trial_data: dict[str, Any]) -> dict[str, Any]:
     verdicts = eligibility_result.get("verdicts", [])
     trial = trial_data.get("trial", trial_data)
 
@@ -164,10 +168,10 @@ def _build_scored_trial(
 
 
 def score_and_rank_trials(
-    eligibility_verdicts: dict,
-    trials_with_criteria: list,
+    eligibility_verdicts: dict[str, dict[str, Any]],
+    trials_with_criteria: list[dict[str, Any]],
     trials_raw: list | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     trial_lookup = _build_trial_lookup(trials_with_criteria, trials_raw)
 
     scored = [

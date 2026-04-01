@@ -6,7 +6,12 @@ from config import settings
 from loguru import logger
 
 
-def refine_search_strategy(normalized_terms, patient_profile, retry_count, current_trial_count):
+def refine_search_strategy(
+    normalized_terms: dict[str, Any],
+    patient_profile: dict[str, Any],
+    retry_count: int,
+    current_trial_count: int,
+) -> dict[str, Any]:
     """Determine refined search strategy based on retry number.
 
     Retry 1: Broaden condition terms (add synonyms, broader terms)
@@ -59,31 +64,36 @@ def refine_search_strategy(normalized_terms, patient_profile, retry_count, curre
     return strategy
 
 
-def _get_broader_terms(normalized_terms, patient_profile):
-    terms = []
+def _get_broader_terms(
+    normalized_terms: dict[str, Any], patient_profile: dict[str, Any]
+) -> list[str]:
+    terms: list[str] = []
     for cond in normalized_terms.get("conditions", {}).values():
         if isinstance(cond, dict):
             for key in ("broader_terms", "synonyms", "search_terms"):
-                terms.extend(cond.get(key, [])[:2])  # Take up to 2 from each category
+                terms.extend([str(t) for t in cond.get(key, [])[:2]])  # Take up to 2 per category
 
     # Fall back to profile if terms is empty
-    terms = terms or patient_profile.get("conditions", [])[:3]
+    profile_conditions = [str(c) for c in patient_profile.get("conditions", [])[:3]]
+    terms = terms or profile_conditions
 
     return list(dict.fromkeys(filter(None, terms)))[:5]
 
 
-def _get_related_conditions(normalized_terms, patient_profile):
-    related = []
+def _get_related_conditions(
+    normalized_terms: dict[str, Any], patient_profile: dict[str, Any]
+) -> list[str]:
+    related: list[str] = []
 
     for cond_data in normalized_terms.get("conditions", {}).values():
         if isinstance(cond_data, dict):
             narrower = cond_data.get("narrower_terms", [])
             related.extend(narrower[:2])
 
-    history = patient_profile.get("medical_history", [])
+    history = [str(h) for h in patient_profile.get("medical_history", [])]
     related.extend(history[:2])
-    seen = set()
-    unique = []
+    seen: set[str] = set()
+    unique: list[str] = []
     for t in related:
         if t not in seen:
             seen.add(t)

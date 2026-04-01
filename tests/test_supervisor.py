@@ -7,7 +7,9 @@ from agents.supervisor import SupervisorOrchestrator
 
 
 @pytest.mark.asyncio
-async def test_supervisor_calls_subagents_in_sequence(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_supervisor_calls_subagents_in_sequence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     order: list[str] = []
 
     class DummyReactAgent:
@@ -24,7 +26,7 @@ async def test_supervisor_calls_subagents_in_sequence(monkeypatch: pytest.Monkey
         staticmethod(lambda: object()),
     )
     monkeypatch.setattr(
-        "agents.supervisor.create_react_agent",
+        "agents.supervisor.create_agent",
         lambda **_: DummyReactAgent(),
     )
 
@@ -34,8 +36,9 @@ async def test_supervisor_calls_subagents_in_sequence(monkeypatch: pytest.Monkey
         patient_profile: dict[str, Any],
         normalized_terms: dict[str, Any] | None = None,
         retry_count: int = 0,
+        thread_id: str | None = None,
     ) -> dict[str, Any]:
-        _ = (patient_profile, normalized_terms, retry_count)
+        _ = (patient_profile, normalized_terms, retry_count, thread_id)
         order.append("retrieval")
         return {"trials_raw": [], "trials_deduplicated": [], "search_queries": []}
 
@@ -43,8 +46,16 @@ async def test_supervisor_calls_subagents_in_sequence(monkeypatch: pytest.Monkey
         patient_profile: dict[str, Any],
         trials_deduplicated: list[dict[str, Any]],
         eligibility_verdicts: dict[str, dict[str, Any]] | None = None,
+        thread_id: str | None = None,
+        attempt: int = 0,
     ) -> dict[str, Any]:
-        _ = (patient_profile, trials_deduplicated, eligibility_verdicts)
+        _ = (
+            patient_profile,
+            trials_deduplicated,
+            eligibility_verdicts,
+            thread_id,
+            attempt,
+        )
         order.append("eligibility")
         return {
             "trial_scores": [],
@@ -63,6 +74,7 @@ async def test_supervisor_calls_subagents_in_sequence(monkeypatch: pytest.Monkey
         search_queries: list[str],
         decision_history: list[str],
         trials_with_criteria: list[dict[str, Any]] | None = None,
+        thread_id: str | None = None,
     ) -> dict[str, Any]:
         _ = (
             patient_profile,
@@ -73,6 +85,7 @@ async def test_supervisor_calls_subagents_in_sequence(monkeypatch: pytest.Monkey
             search_queries,
             decision_history,
             trials_with_criteria,
+            thread_id,
         )
         order.append("synthesis")
         return {"report_json": {"ok": True}, "report_text": "done"}

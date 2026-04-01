@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -61,15 +61,18 @@ async def _ctgov_request_with_retry(url: str, params: dict[str, Any]) -> dict[st
             logger.warning("CT.gov request attempt {} failed: {}", attempt + 1, exc)
             if attempt < settings.ctgov_retry_attempts - 1:
                 await asyncio.sleep(settings.ctgov_retry_backoff_base**attempt)
-    raise last_exc  # type: ignore[misc]
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("ClinicalTrials.gov request failed without a captured exception")
 
 
 def _get(obj: dict[str, Any], *keys: str) -> Any:
+    current: Any = obj
     for key in keys:
-        if not isinstance(obj, dict):
+        if not isinstance(current, dict):
             return None
-        obj = obj.get(key)  # type: ignore[assignment]
-    return obj
+        current = current.get(key)
+    return current
 
 
 def parse_trial_from_response(study: dict[str, Any]) -> dict[str, Any]:
@@ -77,7 +80,8 @@ def parse_trial_from_response(study: dict[str, Any]) -> dict[str, Any]:
     proto = study.get("protocolSection", {})
 
     def sec(name: str) -> dict[str, Any]:
-        return proto.get(name, {})
+        section = proto.get(name, {})
+        return section if isinstance(section, dict) else {}
 
     id_mod = sec("identificationModule")
     status_mod = sec("statusModule")
@@ -160,7 +164,8 @@ async def search_trials(
 
     try:
         data = await _ctgov_request_with_retry(settings.ctgov_base_url, params)
-        return SearchTrialsOutput(studies=data.get("studies", [])).model_dump()
+        studies = cast("list[dict[str, Any]]", data.get("studies", []))
+        return SearchTrialsOutput(studies=studies).model_dump()
     except Exception as exc:
         return SearchTrialsOutput(
             error=ToolError(

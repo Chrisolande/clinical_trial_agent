@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from config import get_llm
 from langchain_core.prompts import ChatPromptTemplate
@@ -44,13 +44,14 @@ async def _invoke_missing_info_llm(
     uncertain_summary: str,
 ) -> CompletenessAssessmentList:
     chain = _get_chain()
-    return await chain.ainvoke(
+    result = await chain.ainvoke(
         {
             "patient_profile": _format_profile_summary(patient_profile),
             "trial_verdicts": uncertain_summary,
         },
         config={"run_name": "missing_info", "tags": ["eligibility", "missing-data"]},
     )
+    return cast("CompletenessAssessmentList", result)
 
 
 async def identify_missing_info(

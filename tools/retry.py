@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import Any, ParamSpec, TypeVar, cast
 
 import httpx
 from config import settings
@@ -17,6 +17,8 @@ from tenacity import (
 
 __all__ = ["RetryError", "http_retry", "llm_retry"]
 std_logger = logging.getLogger("tenacity.retry")
+P = ParamSpec("P")
+R = TypeVar("R")
 F = TypeVar("F", bound=Callable[..., Any])
 
 _TRANSIENT_LLM_ERRORS = (TimeoutError, ConnectionError)
@@ -37,9 +39,11 @@ def _base_retry(retry_condition: Any) -> Any:
     )
 
 
-def llm_retry(func: F) -> F:
-    return _base_retry(retry_if_exception_type(_TRANSIENT_LLM_ERRORS))(func)
+def llm_retry(func: Callable[P, R]) -> Callable[P, R]:
+    wrapped = _base_retry(retry_if_exception_type(_TRANSIENT_LLM_ERRORS))(func)
+    return cast("Callable[P, R]", wrapped)
 
 
-def http_retry(func: F) -> F:
-    return _base_retry(retry_if_exception_type(_TRANSIENT_HTTP_ERRORS))(func)
+def http_retry(func: Callable[P, R]) -> Callable[P, R]:
+    wrapped = _base_retry(retry_if_exception_type(_TRANSIENT_HTTP_ERRORS))(func)
+    return cast("Callable[P, R]", wrapped)

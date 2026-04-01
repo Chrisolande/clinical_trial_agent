@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, cast
 
 from agents import criteria_parser, eligibility_reasoner, missing_info, scorer
 from config import settings
@@ -12,7 +12,7 @@ def _patient_profile_to_dict(patient_profile: Any) -> dict[str, Any]:
     if isinstance(patient_profile, dict):
         return patient_profile
     if hasattr(patient_profile, "model_dump"):
-        return patient_profile.model_dump()
+        return cast("dict[str, Any]", patient_profile.model_dump())
     return {}
 
 
@@ -132,7 +132,7 @@ async def evaluate_trial_worker(state: TrialWorkerState) -> dict[str, Any]:
 # Aggregation node
 
 
-async def aggregate_results(state: EligibilityState):
+async def aggregate_results(state: EligibilityState) -> dict[str, Any]:
     """Merge cached results with new ones then score"""
     cached = state.get("eligibility_verdicts") or {}
     new_trials_criteria = list(state.get("processed_trials_with_criteria") or [])
@@ -165,7 +165,7 @@ async def aggregate_results(state: EligibilityState):
     }
 
 
-async def identify_missing_info(state: EligibilityState):
+async def identify_missing_info(state: EligibilityState) -> dict[str, Any]:
     """Identify missing patient information that would resolve uncertainties."""
     patient_profile = _patient_profile_to_dict(state.get("patient_profile"))
     eligibility_verdicts = state.get("eligibility_verdicts") or {}
@@ -187,7 +187,7 @@ async def identify_missing_info(state: EligibilityState):
         }
 
 
-async def assess_viability_signal(state: EligibilityState):
+async def assess_viability_signal(state: EligibilityState) -> dict[str, Any]:
     """Assess if the supervisor needs to broaden retrieval."""
     viable = state.get("viable_trial_count", 0)
     needs_broadening = viable < settings.viable_trial_threshold

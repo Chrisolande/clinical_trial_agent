@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from config import get_llm
 from langchain_core.prompts import ChatPromptTemplate
@@ -21,7 +21,7 @@ async def _invoke_patient_parser_llm(raw_text: str) -> ExtractedPatientProfile:
         {"clinical_text": raw_text},
         config={"run_name": "patient_parse", "tags": ["supervisor", "parse"]},
     )
-    return result
+    return cast("ExtractedPatientProfile", result)
 
 
 async def parse_patient_profile(raw_text: str) -> dict[str, Any]:

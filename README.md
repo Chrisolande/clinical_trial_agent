@@ -1,85 +1,117 @@
 # Clinical Trial Agent
 
-Multi-agent system for clinical trial matching, eligibility reasoning, and biomedical data extraction.
+Multi-agent clinical trial matching built with LangGraph and LangChain.
+
+It orchestrates retrieval, eligibility reasoning, and report synthesis to match a patient profile to relevant trials from ClinicalTrials.gov.
 
 ## Overview
 
-Clinical Trial Agent leverages stateful, modular agents to automate the process of matching patients to clinical trials, parsing eligibility criteria, extracting patient data, and normalizing biomedical terminology. Built with LangGraph, LangChain, and modern Python tools, it is designed for extensibility, explainability, and integration with clinical data sources.
+The pipeline is coordinated by a supervisor agent that calls three domain subagents:
 
-## Features
+- `retrieval`: finds candidate trials from ClinicalTrials.gov.
+- `eligibility`: scores each trial against patient criteria.
+- `synthesis`: ranks results and generates the final report.
 
-- **Automated Clinical Trial Matching**: Multi-agent workflow for matching patient profiles to trial eligibility.
-- **Eligibility Reasoning**: Structured verdicts (MEETS, FAILS, UNCERTAIN) with explainable logic.
-- **Criteria Parsing**: Converts free-text trial criteria into atomic, assessable statements.
-- **Patient Data Extraction**: Extracts structured data from clinical narratives.
-- **Terminology Normalization**: Maps conditions and drugs to canonical forms (MeSH, ICD-10, INN).
-- **Extensible Agent Architecture**: Easily add new agents, tools, or data sources.
+The system includes PostgreSQL-backed episodic memory and LangGraph checkpointing for durable, thread-scoped runs.
 
-## Installation
+## Key capabilities
 
-**Requirements:** Python 3.11+, PostgreSQL (for memory/cache), API keys for LLM providers (OpenAI, Gemini, etc.)
+- Tool-calling supervisor orchestration with retry-aware routing.
+- Structured eligibility outcomes (`MEETS`, `FAILS`, `UNCERTAIN`) and scored trial ranking.
+- Context-engineering controls (selection, compression, isolation, and score gating).
+- Prompt-driven architecture with all prompt templates centralized in `prompts/`.
+- Async CLI powered by `async-typer` and `rich`.
 
-1. Clone the repository:
- ```bash
- git clone https://github.com/Chrisolande/clinical_trial_agent.git
- cd clinical_trial_agent
- ```
+## Tech stack
 
-2. Create and activate a virtual environment:
- ```bash
- python3.11 -m venv .venv
- source .venv/bin/activate
- ```
+- Python 3.11+
+- LangGraph, LangChain, LangChain provider integrations
+- PostgreSQL (`asyncpg`) for memory/checkpoint persistence
+- `ruff`, `mypy`, `pytest`, `radon` for quality gates
 
-3. Install dependencies:
- ```bash
- pip install -e .
- ```
+## Quick start
 
-4. Configure environment variables:
- - Copy `.env.example` to `.env` and fill in required API keys and database URIs.
+```bash
+git clone https://github.com/Chrisolande/clinical_trial_agent.git
+cd clinical_trial_agent
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+```
 
-## Usage
+Set environment variables (in shell or `.env`):
 
-Run the main CLI or integrate as a Python module:
+```bash
+LLM_PROVIDER=gemini # or openai / auto
+GEMINI_API_KEY=...
+OPENAI_API_KEY=...
+DATABASE_URI=postgresql://postgres:postgres@localhost:5432/postgres
+MEMORY_DB_DSN=postgresql://postgres:postgres@localhost:5432/postgres
+```
+
+> [!IMPORTANT]
+> `DATABASE_URI` and `MEMORY_DB_DSN` must resolve to the same database in this project setup.
+
+Validate your environment:
+
+```bash
+clinical-trial-agent validate-env
+```
+
+## CLI usage
+
+Get help:
 
 ```bash
 clinical-trial-agent --help
 ```
 
-Or use the Python API:
+Run full matching pipeline:
 
-```python
-from agents.trial_search import search_trials
-results = search_trials(condition="lung cancer", intervention="pembrolizumab")
+```bash
+clinical-trial-agent run ./patient_profile.json
 ```
 
-## Project Structure
+Search ClinicalTrials.gov directly:
 
-```
-clinical_trial_agent/
-├── agents/         # Core agent modules (parsing, reasoning, search, etc.)
-├── models/         # Data models (criteria, patient, terminology)
-├── prompts/        # Prompt templates for LLM agents
-├── subagents/      # Specialized subagent workflows (eligibility, retrieval, synthesis)
-├── tools/          # Utility and integration tools (cache, validation, sanitizer)
-├── clinical_trials.py  # ClinicalTrials.gov API integration
-├── config.py           # Environment and settings management
-├── memory.py           # Memory/cache layer
-├── logging_config.py   # Logging setup
-├── validate_env.py     # Environment validation
-├── pyproject.toml      # Project metadata and dependencies
+```bash
+clinical-trial-agent search --condition "non-small cell lung cancer" --intervention "pembrolizumab"
 ```
 
-## Contributing
+Manage episodic memory:
 
-Pull requests and issues are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) if available, or open an issue to discuss your ideas.
+```bash
+clinical-trial-agent memory list
+clinical-trial-agent memory purge
+clinical-trial-agent memory invalidate ./patient_profile.json
+```
 
-## License
+## Project layout
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+```text
+agents/         Supervisor and domain logic
+subagents/      retrieval/, eligibility/, synthesis/ LangGraph workflows
+prompts/        Centralized prompt templates
+models/         Pydantic models and typed state schemas
+tools/          API, retry, cache, and DB helpers
+cli.py          Async Typer + Rich CLI entrypoint
+clinical_trials.py
+memory.py
+config.py
+tests/
+```
 
-## Contact
+## Development
 
-Author: Chris Olande
-Email: <olandechris@gmail.com>
+Run local quality checks:
+
+```bash
+ruff check .
+ruff format --check .
+mypy .
+pytest -q
+radon cc . -s -n B --exclude "tests/*"
+```
+
+> [!TIP]
+> Start with `clinical-trial-agent validate-env` before running the full pipeline.
