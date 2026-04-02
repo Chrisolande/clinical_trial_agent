@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import inspect
+import json
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -11,7 +11,6 @@ from langchain.agents import create_agent
 from langchain_core.runnables import RunnableConfig
 from loguru import logger
 from memory import EpisodicMemory, get_checkpointer
-from prompts.supervisor import build_supervisor_prompt
 from subagents.eligibility.graph import compile_eligibility_graph
 from subagents.retrieval.graph import compiled_retrieval_graph
 from subagents.synthesis.graph import compiled_synthesis_graph
@@ -35,7 +34,7 @@ class SupervisorOrchestrator:
             model=self._get_llm(),
             tools=[self.run_retrieval, self.run_eligibility, self.run_synthesis],
             name="clinical_supervisor",
-            system_prompt=build_supervisor_prompt(),
+            system_prompt="Use tools in order: run_retrieval -> run_eligibility -> run_synthesis.",
             checkpointer=checkpointer,
         )
 
@@ -52,18 +51,7 @@ class SupervisorOrchestrator:
         retry_count: int = 0,
         thread_id: str | None = None,
     ) -> dict[str, Any]:
-        """
-        Run retrieval to fetch relevant trials for the given patient.
-
-        Args:
-            patient_profile: A dictionary containing the patient's summary.
-            normalized_terms: A dictionary containing the normalized search terms.
-            retry_count: An integer indicating the number of times the retrieval should be retried.
-            thread_id: A string indicating the thread the retrieval is running on.
-
-        Returns:
-            A dictionary containing the results of the retrieval.
-        """
+        """Run retrieval subgraph and return normalized retrieval output."""
         retrieval_input = {
             "normalized_terms": normalized_terms or {},
             "patient_profile": patient_profile,
@@ -84,28 +72,16 @@ class SupervisorOrchestrator:
         thread_id: str | None = None,
         attempt: int = 0,
     ) -> dict[str, Any]:
-        """
-        Run eligibility to determine whether the given trials are eligible for the given patient.
-
-        Args:
-            patient_profile: A dictionary containing the patient's summary.
-            trials_deduplicated: A list of dictionaries containing the deduplicated trials.
-            eligibility_verdicts: A dictionary containing the eligibility verdicts.
-            thread_id: A string indicating the thread the eligibility is running on.
-            attempt: An integer indicating the number of times the eligibility should be retried.
-
-        Returns:
-            A dictionary containing the results of the eligibility.
-        """
-        trimmed_trials = []
-        for trial in trials_deduplicated:
-            criteria_text = str(trial.get("eligibility_criteria_raw", ""))
-            trimmed_trials.append(
-                {
-                    **trial,
-                    "eligibility_criteria_raw": criteria_text[: settings.criteria_text_max_chars],
-                }
-            )
+        """Run eligibility subgraph over candidate trials and return scored verdicts."""
+        trimmed_trials = [
+            {
+                **trial,
+                "eligibility_criteria_raw": str(trial.get("eligibility_criteria_raw", ""))[
+                    : settings.criteria_text_max_chars
+                ],
+            }
+            for trial in trials_deduplicated
+        ]
         eligibility_graph = compile_eligibility_graph(use_postgres_checkpointer=False)
         eligibility_input = {
             "patient_profile": patient_profile,
@@ -130,23 +106,7 @@ class SupervisorOrchestrator:
         trials_with_criteria: list[dict[str, Any]] | None = None,
         thread_id: str | None = None,
     ) -> dict[str, Any]:
-        """
-        Run synthesis synthesis to generate a report based on the given trial scores and eligibility verdicts.
-
-        Args:
-            patient_profile: A dictionary containing the patient's summary.
-            trial_scores: A list of dictionaries containing the trial scores.
-            eligibility_verdicts: A dictionary containing the eligibility verdicts.
-            missing_info_recommendations: A list of dictionaries containing the missing information recommendations.
-            trials_raw: A list of dictionaries containing the raw trials.
-            search_queries: A list of strings containing the search queries used.
-            decision_history: A list of strings containing the decision history.
-            trials_with_criteria: A list of dictionaries containing the trials with criteria.
-            thread_id: A string indicating the thread the synthesis synthesis is running on.
-
-        Returns:
-            A dictionary containing the results of the synthesis.
-        """
+        """Run synthesis subgraph to generate final report artifacts."""
         synthesis_input = {
             "patient_profile": patient_profile,
             "trial_scores": trial_scores,
@@ -161,7 +121,8 @@ class SupervisorOrchestrator:
         if thread_id:
             config = {"configurable": {"thread_id": f"{thread_id}:synthesis"}}
         return cast(
-            "dict[str, Any]", await compiled_synthesis_graph.ainvoke(synthesis_input, config=config)
+            "dict[str, Any]",
+            await compiled_synthesis_graph.ainvoke(synthesis_input, config=config),
         )
 
     async def ainvoke(
@@ -181,69 +142,62 @@ class SupervisorOrchestrator:
         finally:
             await memory.close()
 
+        if recursion_limit < 1:
+            raise ValueError("recursion_limit must be >= 1")
+
         patient_summary = self._project_patient_summary(patient_profile)
-        agent_input = {
-            "messages": [
+
+        try:
+            react_result = await self._react_agent.ainvoke(
                 {
-                    "role": "user",
-                    "content": (
-                        "Match this patient to trials by calling tools in order: "
-                        "run_retrieval -> run_eligibility -> run_synthesis.\n"
-                        f"Patient summary: {patient_summary}"
-                    ),
-                }
-            ]
-        }
-        config: RunnableConfig = {
-            "configurable": {"thread_id": thread_id},
-            "recursion_limit": recursion_limit,
-        }
-        if settings.supervisor_use_react:
-            try:
-                result = await asyncio.wait_for(
-                    self._react_agent.ainvoke(agent_input, config=config),
-                    timeout=settings.supervisor_agent_timeout_seconds,
-                )
-                normalized = self._extract_final_result(result)
-                if "report_json" not in normalized and "report_text" in normalized:
-                    normalized = await self._run_tools_pipeline(
-                        patient_summary, thread_id=thread_id
-                    )
-            except TimeoutError:
-                logger.warning(
-                    "Supervisor ReAct agent timed out after {}s; using deterministic pipeline",
-                    settings.supervisor_agent_timeout_seconds,
-                )
-                normalized = await self._run_tools_pipeline(patient_summary, thread_id=thread_id)
-        else:
-            normalized = await self._run_tools_pipeline(patient_summary, thread_id=thread_id)
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": (
+                                "Match this patient to trials by calling tools in order: "
+                                "run_retrieval -> run_eligibility -> run_synthesis.\n"
+                                f"Patient summary: {patient_summary}"
+                            ),
+                        }
+                    ]
+                },
+                config={"configurable": {"thread_id": thread_id}},
+            )
+            extracted = self._extract_final_result(react_result)
+            if isinstance(extracted.get("report_json"), dict):
+                result = extracted
+            else:
+                result = await self._run_tools_pipeline(patient_summary, thread_id=thread_id)
+        except Exception:
+            result = await self._run_tools_pipeline(patient_summary, thread_id=thread_id)
 
         memory = EpisodicMemory()
         await memory.init()
         try:
-            await memory.store(patient_profile, normalized)
+            await memory.store(patient_profile, result)
         finally:
             await memory.close()
 
-        return normalized
+        return result
 
     async def _run_tools_pipeline(
         self, patient_profile: PatientSummary, *, thread_id: str
     ) -> dict[str, Any]:
         run_state = SupervisorRunState(retrieval_result={}, scored_trials=[], final_result={})
-        retry_count = 0
         max_attempts = 1 if settings.one_pass_mode else settings.max_retry_attempts
         eligibility: dict[str, Any] = {}
 
-        while retry_count < max_attempts:
+        for retry_count in range(max_attempts):
             raw_retrieval = await self.run_retrieval(
                 patient_profile=patient_profile,
                 retry_count=retry_count,
                 thread_id=thread_id,
             )
             run_state.retrieval_result = self._compress_retrieval_output(raw_retrieval)
-            trials_for_eligibility = run_state.retrieval_result.get("trials_deduplicated", [])
-            limited_trials = list(trials_for_eligibility)[: settings.max_trials_for_eligibility]
+
+            limited_trials = list(run_state.retrieval_result.get("trials_deduplicated", []))[
+                : settings.max_trials_for_eligibility
+            ]
 
             eligibility = await self.run_eligibility(
                 patient_profile=patient_profile,
@@ -255,11 +209,11 @@ class SupervisorOrchestrator:
             run_state.scored_trials = self._compress_scored_trials(
                 list(eligibility.get("trial_scores", []))
             )
-            if settings.one_pass_mode:
+
+            if settings.one_pass_mode or not bool(
+                eligibility.get("retrieval_needs_broadening", False)
+            ):
                 break
-            if not bool(eligibility.get("retrieval_needs_broadening", False)):
-                break
-            retry_count += 1
 
         synthesis = await self.run_synthesis(
             patient_profile=patient_profile,
@@ -274,8 +228,51 @@ class SupervisorOrchestrator:
             trials_with_criteria=eligibility.get("trials_with_criteria"),
             thread_id=thread_id,
         )
-        run_state.final_result = synthesis
+        run_state.final_result = self._unwrap_synthesis_result(synthesis)
         return run_state.final_result
+
+    @staticmethod
+    def _unwrap_synthesis_result(result: Any) -> dict[str, Any]:
+        """Promote report_json to the top level regardless of how synthesis returns it.
+
+        Synthesis may return:
+        - dict with report_json key directly (ideal path)
+        - dict with report_text key containing a JSON string (LLM serialised it)
+        - something else (degrade gracefully)
+        """
+        if not isinstance(result, dict):
+            return {"report_text": str(result)}
+
+        if isinstance(result.get("report_json"), dict):
+            return result
+
+        report_text = result.get("report_text", "")
+        if isinstance(report_text, str) and report_text.strip().startswith("{"):
+            try:
+                parsed = json.loads(report_text)
+                if isinstance(parsed, dict) and "report_json" in parsed:
+                    return parsed
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        return result
+
+    @staticmethod
+    def _unwrap_report_json(content: str) -> dict[str, Any] | None:
+        """Unwrap nested report_json emitted as a JSON-encoded message content."""
+        try:
+            parsed = json.loads(content)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(parsed, dict):
+            nested = parsed.get("report_json")
+            if isinstance(nested, dict):
+                merged = dict(parsed)
+                merged["report_json"] = nested
+                return merged
+            if "report_text" in parsed:
+                return parsed
+        return None
 
     @staticmethod
     def _extract_final_result(result: Any) -> dict[str, Any]:
@@ -287,6 +284,9 @@ class SupervisorOrchestrator:
                 last = messages[-1]
                 content = getattr(last, "content", None)
                 if isinstance(content, str):
+                    unwrapped = SupervisorOrchestrator._unwrap_report_json(content)
+                    if isinstance(unwrapped, dict):
+                        return unwrapped
                     return {"report_text": content}
         return {"report_text": str(result)}
 
@@ -367,15 +367,7 @@ class SupervisorOrchestrator:
             "key_uncertain",
             "locations_summary",
         )
-        compressed: list[ScoredTrialSummary] = []
-        for trial in trials:
-            slim: ScoredTrialSummary = {}
-            for key in keep:
-                value = trial.get(key)
-                if value is not None:
-                    slim[key] = value
-            compressed.append(slim)
-        return compressed
+        return [{key: trial[key] for key in keep if trial.get(key) is not None} for trial in trials]
 
     @staticmethod
     def _compress_decision_history(decisions: list[str]) -> list[str]:

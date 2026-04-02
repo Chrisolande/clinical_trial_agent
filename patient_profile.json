@@ -1,12 +1,17 @@
 {
-    "age": 62,
-    "sex": "male",
-    "primary_condition": "non-small cell lung cancer",
-    "stage": "IV",
+    "age": 34,
+    "sex": "female",
+    "primary_condition": "colorectal adenocarcinoma",
+    "stage": "III",
     "medications": [
-        "pembrolizumab"
+        "fluorouracil",
+        "leucovorin",
+        "oxaliplatin"
     ],
     "biomarkers": [
-        "PD-L1 high"
+        "KRAS wild-type",
+        "NRAS wild-type",
+        "BRAF wild-type",
+        "MSI-High"
     ]
 }

@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 
-def build_eligibility_prompt(patient_summary: str, trial_summary: str) -> list[dict[str, str]]:
-    return [
-        {
-            "role": "system",
-            "content": """ROLE
+def build_eligibility_prompt() -> str:
+    return """
+ROLE
 You are a conservative clinical trial eligibility judge for oncology matching.
 
 TASK
@@ -13,7 +11,7 @@ Assess each inclusion and exclusion criterion using only the provided patient pr
 
 RULES
 - Use only provided data. Never assume, infer, or fabricate missing facts.
-- If required data is absent, mark the criterion UNCERTAIN and list the missing item in critical_missing_info.
+- If required data is absent, mark the criterion UNCERTAIN and include the missing item in critical_missing_info.
 - Evaluate criteria one-by-one against exact criterion text.
 - Disqualification is absolute: if any hard exclusion is clearly triggered, set match_tier="disqualified" and match_score=0.0.
 - Major criteria are diagnosis, biomarker status, stage/extent, performance status, prior treatment line/agents, and measurable disease.
@@ -24,30 +22,16 @@ RULES
 - Be deterministic and conservative; avoid overclaiming eligibility.
 
 OUTPUT
-- Return valid JSON only inside <verdict>...</verdict>.
-- No prose outside tags. No markdown.
-- Use this exact schema and key names:
-<verdict>
-{
-  "match_score": 0.0,
-  "match_tier": "strong | moderate | weak | disqualified",
-  "major_criteria_assessable": true,
-  "inclusion_met": ["exact criterion text"],
-  "inclusion_failed": ["exact criterion text"],
-  "inclusion_uncertain": ["exact criterion text"],
-  "exclusion_triggered": ["exact criterion text"],
-  "exclusion_uncertain": ["exact criterion text"],
-  "critical_missing_info": ["specific missing patient data needed for eligibility assessment"],
-  "key_concern": "one sentence, max 25 words; use 'None' only if tier is strong",
-  "rationale": "2-3 concise sentences: known facts, unknowns, and conservative implication"
-}
-</verdict>""",
-        },
-        {
-            "role": "user",
-            "content": f"PATIENT PROFILE\n{patient_summary}\n\nTRIAL SUMMARY\n{trial_summary}",
-        },
-    ]
+- Return valid JSON only. No prose. No markdown.
+- Do not include derived/internal fields (for example: is_hard_exclusion).
+- Output must conform to the downstream JudgeVerdict Pydantic model.
+
+PATIENT PROFILE
+{patient_summary}
+
+TRIAL SUMMARY
+{trial_summary}
+""".strip()
 
 
 __all__ = ["build_eligibility_prompt"]

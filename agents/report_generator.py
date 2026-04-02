@@ -101,7 +101,30 @@ def _merge_information_gaps(
     merged = _collect_information_gaps(scored_trials)
     if missing_info:
         merged.extend(missing_info)
-    return merged
+    return _deduplicate_gaps(merged)
+
+
+def _deduplicate_gaps(gaps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: dict[str, dict[str, Any]] = {}
+    priority_rank = {"high": 3, "medium": 2, "low": 1}
+    for gap in gaps:
+        field = str(gap.get("field", "")).strip()
+        if not field:
+            continue
+        if field not in seen:
+            seen[field] = dict(gap)
+            continue
+        current = seen[field]
+        if len(str(gap.get("description", ""))) > len(str(current.get("description", ""))):
+            current["description"] = gap.get("description", current.get("description", ""))
+        current_priority = str(current.get("priority", "low")).lower()
+        new_priority = str(gap.get("priority", "low")).lower()
+        if priority_rank.get(new_priority, 0) > priority_rank.get(current_priority, 0):
+            current["priority"] = new_priority
+        current_ids = set(cast("list[str]", current.get("affected_trial_ids", [])))
+        new_ids = set(cast("list[str]", gap.get("affected_trial_ids", [])))
+        current["affected_trial_ids"] = sorted(current_ids | new_ids)
+    return list(seen.values())
 
 
 def _partition_trials(
@@ -302,9 +325,84 @@ def _render_information_gaps(info_gaps: list[dict[str, Any]]) -> list[str]:
             continue
         lines.append(f"{severity}:")
         for item in items:
-            lines.append(f"- {item.get('field', '')}")
-            lines.append(f"  {item.get('description', '')}")
+            field = str(item.get("field", "")).strip()
+            desc = str(item.get("description", "")).strip()
+            lines.append(f"- {field}")
+            if desc and desc != field:
+                lines.append(f"  {desc}")
         lines.append("")
+    return lines
+
+
+def _render_next_actions(info_gaps: list[dict[str, Any]]) -> list[str]:
+    if not info_gaps:
+        return []
+    lines = ["RECOMMENDED CLINICAL NEXT ACTIONS", "-" * 40]
+    high_then_medium = [
+        g for g in info_gaps if str(g.get("priority", "")).lower() in {"high", "medium"}
+    ]
+    high_then_medium = [
+        g
+        for g in high_then_medium
+        if str(g.get("field", "")).strip().lower()
+        not in {
+            "criterion requires details not present in profile",
+            "missing trial-specific clinical detail",
+            "missing exclusion-history detail",
+        }
+    ]
+    for item in high_then_medium[:8]:
+        field = str(item.get("field", "")).strip()
+        desc = str(item.get("description", "")).strip()
+        trials = ", ".join(list(item.get("affected_trial_ids", []))[:3])
+        lines.append(f"- {field}")
+        if desc:
+            lines.append(f"  Action: {desc}")
+        if trials:
+            lines.append(f"  Affects trials: {trials}")
+    lines.append("")
+    return lines
+
+
+def _render_potential_matches(report_json: dict[str, Any]) -> list[str]:
+    strong = list(report_json.get("strong_matches", []))
+    moderate = list(report_json.get("moderate_matches", []))
+    if strong or moderate:
+        return []
+
+    excluded = list(report_json.get("excluded_trials", []))
+    if not excluded:
+        return []
+
+    # Potential candidates: no hard exclusion failures, with some inclusion evidence.
+    candidates = [
+        t
+        for t in excluded
+        if int(t.get("hard_exclusion_failures", 0)) == 0 and int(t.get("meets_count", 0)) > 0
+    ]
+    candidates = sorted(
+        candidates,
+        key=lambda x: (
+            float(x.get("score", 0.0)),
+            int(x.get("meets_count", 0)),
+            -int(x.get("uncertain_count", 0)),
+        ),
+        reverse=True,
+    )[:5]
+    if not candidates:
+        return []
+
+    lines = ["POTENTIAL MATCHES PENDING ADDITIONAL DATA", "-" * 40]
+    for c in candidates:
+        lines.append(
+            f"- [{c.get('trial_id','')}] {c.get('brief_title','')} | "
+            f"score={float(c.get('score',0.0)):.2f} | "
+            f"met={int(c.get('meets_count',0))} uncertain={int(c.get('uncertain_count',0))}"
+        )
+        concern = str(c.get("key_concern", "")).strip()
+        if concern:
+            lines.append(f"  Limitation: {concern}")
+    lines.append("")
     return lines
 
 
@@ -350,7 +448,11 @@ def build_text_report(report_json: dict[str, Any]) -> str:
     )
     lines.append("")
 
-    lines.extend(_render_information_gaps(list(report_json.get("information_gaps", []))))
+    lines.extend(_render_potential_matches(report_json))
+
+    gaps = list(report_json.get("information_gaps", []))
+    lines.extend(_render_information_gaps(gaps))
+    lines.extend(_render_next_actions(gaps))
 
     qa_issues = report_json.get("qa_issues", [])
     if qa_issues:

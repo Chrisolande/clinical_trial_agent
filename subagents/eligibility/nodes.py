@@ -20,6 +20,22 @@ def _trial_id(trial: dict[str, Any]) -> str:
     return str(trial.get("nct_id") or trial.get("trial_id") or "unknown")
 
 
+def _tokenize(text: str) -> set[str]:
+    cleaned = "".join(ch.lower() if ch.isalnum() else " " for ch in text)
+    stopwords = {"a", "of", "in", "for", "the", "and", "with", "to", "or"}
+    return {tok for tok in cleaned.split() if len(tok) > 2 and tok not in stopwords}
+
+
+def _is_plausibly_relevant(trial: dict[str, Any], patient_condition: str) -> bool:
+    patient_tokens = _tokenize(patient_condition)
+    if not patient_tokens:
+        return True
+    trial_conditions = " ".join(str(c) for c in trial.get("conditions", []))
+    trial_title = str(trial.get("brief_title", ""))
+    combined_tokens = _tokenize(f"{trial_conditions} {trial_title}")
+    return bool(patient_tokens & combined_tokens)
+
+
 async def fan_out_trials(state: EligibilityState) -> dict[str, Any]:
     trials = list(state.get("trials_deduplicated") or [])
     cached = state.get("eligibility_verdicts") or {}
@@ -57,6 +73,36 @@ async def evaluate_trial_worker(state: TrialWorkerState) -> dict[str, Any]:
     trial = state["trial"]
     patient_profile = _patient_profile_to_dict(state["patient_profile"])
     nct_id = _trial_id(trial)
+    patient_condition = str(
+        patient_profile.get("primary_condition") or (patient_profile.get("conditions") or [""])[0]
+    )
+
+    if patient_condition and not _is_plausibly_relevant(trial, patient_condition):
+        verdict_data = {
+            "trial_id": nct_id,
+            "match_score": 0.0,
+            "match_tier": "disqualified",
+            "major_criteria_assessable": False,
+            "critical_missing_info": [
+                "Trial appears condition-mismatched to patient primary condition."
+            ],
+            "key_concern": "Trial condition appears unrelated to patient condition",
+            "rationale": (
+                "Skipped LLM eligibility evaluation due to low condition/title token overlap "
+                "with patient primary condition."
+            ),
+            "verdicts": [],
+            "meets_count": 0,
+            "fails_count": 0,
+            "uncertain_count": 0,
+            "hard_exclusion_failures": 0,
+        }
+        return {
+            "processed_trials_with_criteria": [
+                {"trial": trial, "inclusion_criteria": [], "exclusion_criteria": []}
+            ],
+            "processed_verdicts": [verdict_data],
+        }
 
     try:
         parsed_trials = await criteria_parser.parse_criteria_for_trials([trial])

@@ -39,3 +39,20 @@ async def test_tavily_supplements_missing_eligibility_text(monkeypatch: pytest.M
     assert count == 1
     assert updated[0]["eligibility_criteria_raw"] is not None
     assert updated[1]["eligibility_criteria_raw"] == "Already present"
+
+
+def test_build_search_queries_biases_condition_intervention_and_biomarker() -> None:
+    normalized_terms = {
+        "primary_search_terms": ["colorectal adenocarcinoma"],
+        "intervention_search_terms": ["FOLFOX", "chemotherapy"],
+    }
+    patient_profile = {
+        "primary_condition": "colorectal adenocarcinoma",
+        "biomarkers": ["MSI-H"],
+        "medications": ["FOLFOX"],
+    }
+    queries = trial_search.build_search_queries(normalized_terms, patient_profile)
+    assert queries
+    assert queries[0].get("condition") == "colorectal adenocarcinoma"
+    assert queries[0].get("intervention") == "FOLFOX"
+    assert any("MSI-H" in str(q.get("condition", "")) for q in queries)

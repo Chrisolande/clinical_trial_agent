@@ -6,20 +6,30 @@ import asyncio
 from typing import Any, cast
 
 from config import get_llm, settings
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import (
+    ChatPromptTemplate,
+    HumanMessagePromptTemplate,
+    SystemMessagePromptTemplate,
+)
 from loguru import logger
 from models.missing_info import CompletenessAssessmentList
-from prompts.missinginfo import build_missing_info_prompt
+from prompts.missinginfo import build_missing_info_human_prompt, build_missing_info_system_prompt
 
-_PROMPT: ChatPromptTemplate = ChatPromptTemplate.from_template(build_missing_info_prompt())
-_CHAIN: Any = None
+_PROMPT: ChatPromptTemplate = ChatPromptTemplate.from_messages(
+    [
+        SystemMessagePromptTemplate.from_template(build_missing_info_system_prompt()),
+        HumanMessagePromptTemplate.from_template(build_missing_info_human_prompt()),
+    ]
+)
 
 
 def _get_chain() -> Any:
-    global _CHAIN
-    if _CHAIN is None:
-        _CHAIN = _PROMPT | get_llm().with_structured_output(CompletenessAssessmentList)
-    return _CHAIN
+    """Build a fresh chain per call.
+
+    Caching this chain globally can bind transports to a stale asyncio loop under
+    uvicorn/pytest startup behavior.
+    """
+    return _PROMPT | get_llm().with_structured_output(CompletenessAssessmentList)
 
 
 def _build_uncertain_summary(
@@ -46,8 +56,10 @@ async def _invoke_missing_info_llm(
     patient_profile: dict[str, Any],
     uncertain_summary: str,
 ) -> CompletenessAssessmentList:
-    result = await asyncio.wait_for(
-        _get_chain().ainvoke(
+    """Invoke the missing-info chain. Timeout is delegated to RunnableConfig."""
+    return cast(
+        "CompletenessAssessmentList",
+        await _get_chain().ainvoke(
             {
                 "patient_profile": _format_profile_summary(patient_profile),
                 "trial_verdicts": uncertain_summary,
@@ -55,11 +67,10 @@ async def _invoke_missing_info_llm(
             config={
                 "run_name": "missing_info",
                 "tags": ["eligibility", "missing-data"],
+                "timeout": settings.llm_call_timeout_seconds,
             },
         ),
-        timeout=settings.llm_call_timeout_seconds,
     )
-    return cast("CompletenessAssessmentList", result)
 
 
 async def identify_missing_info(
@@ -89,6 +100,107 @@ async def identify_missing_info(
         return _fallback_missing_info_recommendations(uncertain_by_theme)
 
 
+_ACTIONABLE_FIELD_MAP: dict[str, tuple[str, str]] = {
+    "ecog": (
+        "ECOG performance status",
+        "Document ECOG 0-4 from current oncology assessment.",
+    ),
+    "performance": (
+        "ECOG performance status",
+        "Document ECOG 0-4 from current oncology assessment.",
+    ),
+    "karnofsky": (
+        "Performance status (Karnofsky/ECOG)",
+        "Record functional status scale used by the treating oncology team.",
+    ),
+    "creatinine": (
+        "Renal function labs",
+        "Order serum creatinine and calculate creatinine clearance/eGFR.",
+    ),
+    "egfr": (
+        "Renal function labs",
+        "Order serum creatinine and calculate creatinine clearance/eGFR.",
+    ),
+    "ast": (
+        "Liver function labs",
+        "Order AST/ALT and total bilirubin to verify hepatic eligibility criteria.",
+    ),
+    "alt": (
+        "Liver function labs",
+        "Order AST/ALT and total bilirubin to verify hepatic eligibility criteria.",
+    ),
+    "bilirubin": (
+        "Liver function labs",
+        "Order AST/ALT and total bilirubin to verify hepatic eligibility criteria.",
+    ),
+    "platelet": (
+        "Hematology labs (CBC)",
+        "Obtain CBC with differential including ANC, hemoglobin, and platelet count.",
+    ),
+    "hemoglobin": (
+        "Hematology labs (CBC)",
+        "Obtain CBC with differential including ANC, hemoglobin, and platelet count.",
+    ),
+    "anc": (
+        "Hematology labs (CBC)",
+        "Obtain CBC with differential including ANC, hemoglobin, and platelet count.",
+    ),
+    "ldh": (
+        "LDH value",
+        "Obtain serum LDH and compare against protocol threshold.",
+    ),
+    "braf": (
+        "BRAF mutation status",
+        "Confirm BRAF mutation result from pathology/molecular report.",
+    ),
+    "pd-l1": (
+        "PD-L1 status",
+        "Confirm PD-L1 assay result and method from pathology report.",
+    ),
+    "recist": (
+        "Measurable disease assessment (RECIST)",
+        "Document baseline measurable lesions per RECIST v1.1 on imaging.",
+    ),
+    "measurable lesion": (
+        "Measurable disease assessment (RECIST)",
+        "Document baseline measurable lesions per RECIST v1.1 on imaging.",
+    ),
+    "bleeding": (
+        "Recent bleeding history",
+        "Document Grade >=3 bleeding/hemorrhage history within protocol time window.",
+    ),
+    "cardiac": (
+        "Cardiac history/assessment",
+        "Document relevant cardiac history and recent ECG/echo if protocol requires.",
+    ),
+    "retinal": (
+        "Ophthalmologic history",
+        "Document retinal/ocular history and exam findings if required by protocol.",
+    ),
+    "histology": (
+        "Pathology confirmation",
+        "Attach pathology report confirming diagnosis and disease subtype.",
+    ),
+    "diagnosis": (
+        "Pathology confirmation",
+        "Attach pathology report confirming diagnosis and disease subtype.",
+    ),
+}
+
+
+def _to_actionable_field(raw_text: str) -> tuple[str, str]:
+    lowered = raw_text.lower()
+    for key, mapped in _ACTIONABLE_FIELD_MAP.items():
+        if key in lowered:
+            return mapped
+    cleaned = raw_text.strip().rstrip(".")
+    fallback_field = cleaned[:80] if cleaned else "Additional clinical detail"
+    return (
+        fallback_field,
+        "Capture this missing clinical detail in structured form (note/lab/pathology).",
+    )
+
+
 def _fallback_missing_info_recommendations(
     uncertain_by_theme: dict[str, list[str]],
 ) -> list[dict[str, Any]]:
@@ -101,18 +213,18 @@ def _fallback_missing_info_recommendations(
         reverse=True,
     )[:10]
 
-    return [
-        {
-            "field": text,
-            "description": (
-                "Patient data is missing or ambiguous for this criterion and blocks a "
-                "confident eligibility verdict."
-            ),
-            "affected_trial_ids": list(dict.fromkeys(ids)),
-            "priority": _priority_from_impact(len(set(ids))),
-        }
-        for text, ids in items
-    ]
+    recommendations: list[dict[str, Any]] = []
+    for text, ids in items:
+        field, description = _to_actionable_field(text)
+        recommendations.append(
+            {
+                "field": field,
+                "description": description,
+                "affected_trial_ids": list(dict.fromkeys(ids)),
+                "priority": _priority_from_impact(len(set(ids))),
+            }
+        )
+    return recommendations
 
 
 def _priority_from_impact(affected_count: int) -> str:

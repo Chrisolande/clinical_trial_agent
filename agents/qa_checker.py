@@ -29,14 +29,18 @@ def _check_age_consistency(
 
 
 def _detect_age_inconsistency(patient_age: int, age_verdicts: list[tuple[str, str]]) -> list[str]:
-    age_meets = [trial_id for trial_id, verdict in age_verdicts if verdict == "MEETS"]
-    age_fails = [trial_id for trial_id, verdict in age_verdicts if verdict == "FAILS"]
-    if age_meets and age_fails and len(age_meets) > 2 and len(age_fails) > 2:
+    by_trial: dict[str, set[str]] = {}
+    for trial_id, verdict in age_verdicts:
+        by_trial.setdefault(trial_id, set()).add(verdict)
+    contradictory_trials = [
+        trial_id for trial_id, verdicts in by_trial.items() if {"MEETS", "FAILS"} <= verdicts
+    ]
+    if contradictory_trials:
+        sample = contradictory_trials[:3]
         return [
             (
-                f"Age criterion inconsistency: patient (age {patient_age}) both meets and fails "
-                f"age criteria across trials. Review: meets in {age_meets[:2]}, "
-                f"fails in {age_fails[:2]}."
+                f"Age criterion inconsistency within trial(s) for patient age {patient_age}: "
+                f"{sample}. Review parsed age criteria for contradictory verdicts."
             )
         ]
     return []

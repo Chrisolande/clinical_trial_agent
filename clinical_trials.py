@@ -51,7 +51,7 @@ def _urllib_get_json(url: str, params: dict[str, Any], timeout: float = 30.0) ->
     query = urlencode(params, doseq=True)
     full_url = f"{url}?{query}" if query else url
     req = Request(full_url, headers=_CTGOV_HEADERS)
-    with urlopen(req, timeout=timeout) as resp:  # nosec B310
+    with urlopen(req, timeout=timeout) as resp:  # nosec B310 — URL is a hardcoded CT.gov endpoint, not user input
         raw = json.loads(resp.read())
     return raw if isinstance(raw, dict) else {}
 
@@ -78,6 +78,19 @@ def _get(obj: dict[str, Any], *keys: str) -> Any:
             return None
         current = current.get(key)
     return current
+
+
+def _split_eligibility_criteria(raw: str) -> tuple[str, str]:
+    """Split CT.gov eligibilityCriteria blob into inclusion and exclusion text."""
+    if not raw:
+        return "", ""
+    if "Exclusion Criteria:" in raw:
+        inclusion_part, exclusion_part = raw.split("Exclusion Criteria:", 1)
+        return (
+            inclusion_part.replace("Inclusion Criteria:", "").strip(),
+            exclusion_part.strip(),
+        )
+    return raw.replace("Inclusion Criteria:", "").strip(), ""
 
 
 def parse_trial_from_response(study: dict[str, Any]) -> dict[str, Any]:
@@ -125,14 +138,17 @@ def parse_trial_from_response(study: dict[str, Any]) -> dict[str, Any]:
         completion_date_obj.get("date") if isinstance(completion_date_obj, dict) else None
     )
 
-    return {
+    raw_criteria = elig_mod.get("eligibilityCriteria")
+    inclusion_text, exclusion_text = _split_eligibility_criteria(str(raw_criteria or ""))
+
+    parsed = {
         "nct_id": id_mod.get("nctId", ""),
         "brief_title": id_mod.get("briefTitle", ""),
         "official_title": id_mod.get("officialTitle"),
         "overall_status": status_mod.get("overallStatus", ""),
         "phase": ", ".join(phases) if phases else None,
         "lead_sponsor": _get(sec("sponsorCollaboratorsModule"), "leadSponsor", "name"),
-        "eligibility_criteria_raw": elig_mod.get("eligibilityCriteria"),
+        "eligibility_criteria_raw": raw_criteria,
         "locations": locations,
         "primary_outcomes": primary_outcomes,
         "primary_completion_date": completion_date,
@@ -144,6 +160,10 @@ def parse_trial_from_response(study: dict[str, Any]) -> dict[str, Any]:
         "conditions": sec("conditionsModule").get("conditions", []),
         "interventions": interventions,
     }
+    if isinstance(raw_criteria, str) and raw_criteria.strip():
+        parsed["inclusion_criteria_parsed"] = inclusion_text
+        parsed["exclusion_criteria_parsed"] = exclusion_text
+    return parsed
 
 
 def _extract_studies(data: dict[str, Any]) -> list[dict[str, Any]]:

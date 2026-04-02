@@ -1,25 +1,117 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, cast
+import re
+from typing import Any, Literal, cast
 
 from config import get_llm, settings
 from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
-from models.criteria import ParsedEligibilityCriterion
+from models.criteria import EligibilityCriterion, ParsedEligibilityCriterion
 from prompts.criteria_parser import build_criteria_parser_prompt
 from tools import cache
 from tools.retry import llm_retry
 
+CriterionCategoryLiteral = Literal[
+    "age", "lab", "biomarker", "diagnosis", "medication", "performance", "other"
+]
+
 _PROMPT: ChatPromptTemplate = ChatPromptTemplate.from_template(build_criteria_parser_prompt())
-_CHAIN: Any = None
 
 
 def _get_chain() -> Any:
-    global _CHAIN
-    if _CHAIN is None:
-        _CHAIN = _PROMPT | get_llm().with_structured_output(ParsedEligibilityCriterion)
-    return _CHAIN
+    """Build a fresh parser chain per call to avoid stale loop-bound transports."""
+    return _PROMPT | get_llm().with_structured_output(ParsedEligibilityCriterion)
+
+
+def _infer_category(text: str) -> CriterionCategoryLiteral:
+    lowered = text.lower()
+    if any(k in lowered for k in ["age", "year", "yo"]):
+        return "age"
+    if any(k in lowered for k in ["egfr", "braf", "alk", "pd-l1", "mutation", "biomarker"]):
+        return "biomarker"
+    if any(
+        k in lowered
+        for k in ["creatinine", "bilirubin", "ast", "alt", "hemoglobin", "platelet", "wbc", "ldh"]
+    ):
+        return "lab"
+    if any(k in lowered for k in ["ecog", "karnofsky", "performance"]):
+        return "performance"
+    if any(k in lowered for k in ["diagnosis", "histology", "pathology", "metastatic", "stage"]):
+        return "diagnosis"
+    if any(
+        k in lowered
+        for k in ["treatment", "therapy", "drug", "medication", "immunotherapy", "chemotherapy"]
+    ):
+        return "medication"
+    return cast("CriterionCategoryLiteral", "other")
+
+
+def _clean_lines(text: str) -> list[str]:
+    lines: list[str] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        line = re.sub(r"^[\-•*]+\s*", "", line)
+        line = re.sub(r"^\(?\d+[.)]\s*", "", line)
+        line = re.sub(r"^\(?[a-zA-Z][.)]\s*", "", line)
+        line = re.sub(r"\s+", " ", line).strip(" .")
+        if len(line) < 8:
+            continue
+        if line.lower() in {"inclusion criteria", "exclusion criteria"}:
+            continue
+        lines.append(line)
+    # de-duplicate preserving order
+    return list(dict.fromkeys(lines))
+
+
+def _split_sections(text: str) -> tuple[list[str], list[str]]:
+    if not text:
+        return [], []
+    if "Exclusion Criteria:" in text:
+        inclusion_part, exclusion_part = text.split("Exclusion Criteria:", 1)
+        inclusion_part = inclusion_part.replace("Inclusion Criteria:", "")
+        return _clean_lines(inclusion_part), _clean_lines(exclusion_part)
+
+    lines = _clean_lines(text.replace("Inclusion Criteria:", ""))
+    inclusion: list[str] = []
+    exclusion: list[str] = []
+    for line in lines:
+        lowered = line.lower()
+        if any(
+            k in lowered
+            for k in ["exclude", "must not", "ineligible", "not eligible", "history of"]
+        ):
+            exclusion.append(line)
+        else:
+            inclusion.append(line)
+    return inclusion, exclusion
+
+
+def _fallback_parse_criteria(eligibility_text: str) -> ParsedEligibilityCriterion:
+    inclusion_lines, exclusion_lines = _split_sections(eligibility_text)
+
+    inclusion = [
+        EligibilityCriterion(
+            text=line,
+            is_hard_exclusion=False,
+            category=_infer_category(line),
+        )
+        for line in inclusion_lines[:60]
+    ]
+    exclusion = [
+        EligibilityCriterion(
+            text=line,
+            is_hard_exclusion=True,
+            category=_infer_category(line),
+        )
+        for line in exclusion_lines[:60]
+    ]
+    return ParsedEligibilityCriterion(
+        inclusion_criteria=inclusion,
+        exclusion_criteria=exclusion,
+    )
 
 
 async def parse_eligibility_criteria(eligibility_text: str, nct_id: str) -> dict[str, Any]:
@@ -38,6 +130,8 @@ async def parse_eligibility_criteria(eligibility_text: str, nct_id: str) -> dict
 
     try:
         parsed_obj = await _invoke_criteria_llm(_get_chain(), cache_params)
+        if not parsed_obj.inclusion_criteria and not parsed_obj.exclusion_criteria:
+            parsed_obj = _fallback_parse_criteria(eligibility_text)
         result = parsed_obj.model_dump()
         parsed = _assign_ids(result, nct_id)
 
@@ -47,8 +141,11 @@ async def parse_eligibility_criteria(eligibility_text: str, nct_id: str) -> dict
         return parsed
 
     except Exception:
-        logger.exception("Criteria parsing failed for {}", nct_id)
-        return {"inclusion_criteria": [], "exclusion_criteria": []}
+        logger.warning(
+            "Criteria parsing failed for {}. Falling back to deterministic split.", nct_id
+        )
+        fallback = _fallback_parse_criteria(eligibility_text)
+        return _assign_ids(fallback.model_dump(), nct_id)
 
 
 @llm_retry
@@ -87,7 +184,12 @@ async def parse_criteria_for_trials(
 ) -> list[dict[str, Any]]:
     tasks = [
         parse_eligibility_criteria(
-            trial.get("eligibility_criteria_raw", "") or "",
+            (
+                f"Inclusion Criteria:\n{trial.get('inclusion_criteria_parsed', '')}\n\n"
+                f"Exclusion Criteria:\n{trial.get('exclusion_criteria_parsed', '')}"
+            ).strip()
+            if trial.get("inclusion_criteria_parsed") or trial.get("exclusion_criteria_parsed")
+            else (trial.get("eligibility_criteria_raw", "") or ""),
             trial.get("nct_id", "unknown"),
         )
         for trial in trials

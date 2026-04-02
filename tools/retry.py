@@ -5,6 +5,7 @@ from collections.abc import Callable
 from typing import Any, ParamSpec, TypeVar, cast
 
 import httpx
+import openai
 from config import settings
 from loguru import logger
 from tenacity import (
@@ -22,7 +23,12 @@ P = ParamSpec("P")
 R = TypeVar("R")
 F = TypeVar("F", bound=Callable[..., Any])
 
-_TRANSIENT_LLM_ERRORS = (TimeoutError, ConnectionError)
+_TRANSIENT_LLM_ERRORS = (
+    TimeoutError,
+    ConnectionError,
+    openai.APITimeoutError,
+    openai.APIConnectionError,
+)
 _TRANSIENT_HTTP_ERRORS = (httpx.HTTPStatusError, httpx.RequestError)
 
 

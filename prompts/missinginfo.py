@@ -1,34 +1,35 @@
 from __future__ import annotations
 
 
+def build_missing_info_system_prompt() -> str:
+    return (
+        "You are a clinical data completeness analyst.\n\n"
+        "Identify missing patient data that would most reduce UNCERTAIN eligibility verdicts.\n\n"
+        "RULES:\n"
+        "- Use only the provided patient profile and trial verdicts.\n"
+        "- Return at most 10 items sorted by clinical impact (highest first).\n"
+        "- Recommend only actionable, clinically obtainable fields.\n"
+        "- priority must be exactly one of: high, medium, low.\n"
+        "- affected_trial_ids must only contain trial IDs present in the input.\n"
+        "- Use concise field names: 'EGFR mutation status', not 'biomarker information'.\n"
+        "- description must explain WHY this field matters for eligibility, not just restate the field name.\n"
+        "  Example good: 'Required to assess eligibility for MSI-H immunotherapy trials; absent biomarker blocks 3 trials.'\n"
+        "  Example bad: 'ECOG performance status'.\n"
+        "- Exclude administrative fields: consent status, language, site logistics.\n"
+        "- Return schema-compliant structured data only. No markdown. No commentary."
+    )
+
+
+def build_missing_info_human_prompt() -> str:
+    return "PATIENT PROFILE:\n{patient_profile}\n\nTRIAL VERDICTS:\n{trial_verdicts}"
+
+
 def build_missing_info_prompt() -> str:
-    return """
-ROLE
-You are a clinical data completeness analyst.
-
-TASK
-Identify missing patient data that would most reduce UNCERTAIN eligibility verdicts.
-
-RULES
-- Use only provided patient profile and trial verdict summary.
-- If information is absent, treat it as unknown; do not assume facts.
-- Return at most 10 items sorted by impact.
-- Recommend only actionable, clinically obtainable fields.
-- priority must be exactly one of: high, medium, low.
-- affected_trial_ids must include only trial IDs present in input.
-- Keep field and description specific and concise.
-- Exclude administrative or irrelevant data.
-
-OUTPUT
-- Return schema-compliant structured data only.
-- No markdown. No commentary. No extra keys.
-
-PATIENT PROFILE:
-{patient_profile}
-
-TRIAL VERDICTS:
-{trial_verdicts}
-""".strip()
+    return build_missing_info_system_prompt() + "\n\n" + build_missing_info_human_prompt()
 
 
-COMPLETENESS_PROMPT = build_missing_info_prompt()
+__all__ = [
+    "build_missing_info_human_prompt",
+    "build_missing_info_prompt",
+    "build_missing_info_system_prompt",
+]
