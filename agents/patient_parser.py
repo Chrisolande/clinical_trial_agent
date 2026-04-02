@@ -28,11 +28,11 @@ async def parse_patient_profile(raw_text: str) -> dict[str, Any]:
     """Parse raw clinical text into a structured dictionary."""
     try:
         parsed = await _invoke_patient_parser_llm(raw_text)
-        return parsed.model_dump()
+        return cast("dict[str, Any]", parsed.model_dump())
     except Exception as exc:
-        logger.error("Patient parsing failed after retries: %s", exc)
+        logger.error("Patient parsing failed after retries: {}", exc)
 
         fallback_profile = ExtractedPatientProfile(
             additional_notes=f"[PARSING FAILED - RAW TEXT INCLUDED]\n\n{raw_text}"
         )
-        return fallback_profile.model_dump()
+        return cast("dict[str, Any]", fallback_profile.model_dump())

@@ -6,7 +6,7 @@ from agents import search_refiner, trial_search
 from config import settings
 from loguru import logger
 
-from .state import RetrievalState  # noqa: TCH001
+from .state import RetrievalState
 
 
 def _get_new_unique_trials(
@@ -74,7 +74,7 @@ async def execute_searches(state: RetrievalState) -> dict[str, Any]:
             ],
         }
     except Exception as exc:
-        logger.error("execute_searches failed: %s", exc)
+        logger.error("execute_searches failed: {}", exc)
         return {
             "fetched_trials": [],
             "executed_query_strings": [],
@@ -106,6 +106,8 @@ async def assess_and_finalize(state: RetrievalState) -> dict[str, Any]:
 
 def should_retry_search(state: RetrievalState) -> str:
     """Route: if too few unique new results and internal retries available, try again."""
+    if settings.one_pass_mode:
+        return "finalize"
     fetched = state.get("fetched_trials") or []
     existing_ids = set(state.get("existing_nct_ids") or [])
 

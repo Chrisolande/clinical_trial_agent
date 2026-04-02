@@ -146,6 +146,20 @@ def parse_trial_from_response(study: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _extract_studies(data: dict[str, Any]) -> list[dict[str, Any]]:
+    studies = data.get("studies", [])
+    if isinstance(studies, list):
+        return [s for s in studies if isinstance(s, dict)]
+    return []
+
+
+def _extract_single_study(data: dict[str, Any]) -> dict[str, Any]:
+    if "protocolSection" in data and isinstance(data.get("protocolSection"), dict):
+        return data
+    studies = _extract_studies(data)
+    return studies[0] if studies else {}
+
+
 async def search_trials(
     condition: str | None = None,
     intervention: str | None = None,
@@ -171,17 +185,20 @@ async def search_trials(
         data = await _ctgov_request_with_retry(
             _studies_endpoint_url(settings.ctgov_base_url), params
         )
-        studies_raw = cast("list[dict[str, Any]]", data.get("studies", []))
+        studies_raw = _extract_studies(data)
         studies = [parse_trial_from_response(study) for study in studies_raw]
-        return SearchTrialsOutput(studies=studies).model_dump()
+        return cast("dict[str, Any]", SearchTrialsOutput(studies=studies).model_dump())
     except Exception as exc:
-        return SearchTrialsOutput(
-            error=ToolError(
-                type="request_error",
-                message=f"ClinicalTrials.gov request error: {exc}",
-                retryable=True,
-            ),
-        ).model_dump()
+        return cast(
+            "dict[str, Any]",
+            SearchTrialsOutput(
+                error=ToolError(
+                    type="request_error",
+                    message=f"ClinicalTrials.gov request error: {exc}",
+                    retryable=True,
+                ),
+            ).model_dump(),
+        )
 
 
 async def fetch_trial_detail(nct_id: str) -> dict[str, Any]:
@@ -189,13 +206,20 @@ async def fetch_trial_detail(nct_id: str) -> dict[str, Any]:
     url = f"{_studies_endpoint_url(settings.ctgov_base_url)}/{nct_id}"
     try:
         data = await _ctgov_request_with_retry(url, {"format": "json"})
-        return FetchTrialDetailOutput(trial=parse_trial_from_response(data)).model_dump()
+        study = _extract_single_study(data)
+        return cast(
+            "dict[str, Any]",
+            FetchTrialDetailOutput(trial=parse_trial_from_response(study)).model_dump(),
+        )
     except Exception as exc:
         logger.warning("Error fetching {}: {}", nct_id, exc)
-        return FetchTrialDetailOutput(
-            error=ToolError(
-                type="request_error",
-                message=f"ClinicalTrials.gov detail request error: {exc}",
-                retryable=True,
-            ),
-        ).model_dump()
+        return cast(
+            "dict[str, Any]",
+            FetchTrialDetailOutput(
+                error=ToolError(
+                    type="request_error",
+                    message=f"ClinicalTrials.gov detail request error: {exc}",
+                    retryable=True,
+                ),
+            ).model_dump(),
+        )

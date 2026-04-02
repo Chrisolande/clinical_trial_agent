@@ -8,3 +8,4 @@ clinical_trial_agent.egg-info
 .idea/
 __pycache__/
 .venv/
+.langgraph_api/

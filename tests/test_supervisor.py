@@ -58,7 +58,7 @@ async def test_supervisor_calls_subagents_in_sequence(
         )
         order.append("eligibility")
         return {
-            "trial_scores": [],
+            "trial_scores": [{"trial_id": "T1", "tier": "moderate", "score": 0.6}],
             "eligibility_verdicts": {},
             "missing_info_recommendations": [],
             "decision_history": [],

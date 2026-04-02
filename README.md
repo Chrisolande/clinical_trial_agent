@@ -116,3 +116,57 @@ radon cc . -s -n B --exclude "tests/*"
 
 > [!TIP]
 > Start with `clinical-trial-agent validate-env` before running the full pipeline.
+
+## LangGraph dev server
+
+This repo includes a `langgraph.json` config with four exported graphs:
+
+- `clinical_trial_agent` (end-to-end supervisor pipeline)
+- `retrieval`
+- `eligibility`
+- `synthesis`
+
+Start the LangGraph development server:
+
+```bash
+source .venv/bin/activate
+langgraph dev --config langgraph.json --no-browser
+```
+
+Invoke the full end-to-end graph from another terminal:
+
+```bash
+curl -sS -X POST "http://127.0.0.1:2024/runs/wait" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "assistant_id": "clinical_trial_agent",
+    "input": {
+      "patient_profile": {
+        "age": 62,
+        "sex": "female",
+        "primary_condition": "non-small cell lung cancer",
+        "conditions": ["non-small cell lung cancer"]
+      },
+      "thread_id": "dev-e2e-1"
+    },
+    "config": {"configurable": {"thread_id": "dev-e2e-1"}}
+  }'
+```
+
+For subgraph-only testing, change `assistant_id` to `retrieval`, `eligibility`, or `synthesis` and provide each graph's expected input schema.
+
+### Token tracing workflow (Studio)
+
+1. Start server:
+
+```bash
+langgraph dev --config langgraph.json --port 2025
+```
+
+2. Open Studio using the printed URL for port `2025`.
+3. Select assistant **`clinical_trial_agent`** to see the full top-level node path:
+   - `run_retrieval`
+   - `run_eligibility`
+   - `retry_retrieval` (conditional)
+   - `run_synthesis`
+4. Drill into assistants `retrieval`, `eligibility`, and `synthesis` to inspect internal node-level traces and identify expensive LLM steps.

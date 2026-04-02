@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from config import TIER_ORDER
+
 
 async def run_qa_check(
     patient_profile: dict[str, Any],
@@ -66,20 +68,15 @@ def _check_score_verdict_alignment(
             continue
 
         hard_failures = int(verdict.get("hard_exclusion_failures", 0))
-        score = float(scored.get("score", 0.0))
-        if hard_failures >= 2 and score >= 0.7:
+        tier = str(scored.get("tier", "weak"))
+        if hard_failures >= 1 and TIER_ORDER.get(tier, 0) >= TIER_ORDER["moderate"]:
             issues.append(
-                f"Inconsistency: {trial_id} has {hard_failures} hard exclusion failures "
-                f"but score={score:.2f} (strong match tier). Score may be overestimated."
+                f"Inconsistency: {trial_id} has hard exclusion failures but tier={tier}. "
+                "Hard exclusions should strongly suppress ranking."
             )
 
-        meets = int(verdict.get("meets_count", 0))
-        fails = int(verdict.get("fails_count", 0))
         uncertain = int(verdict.get("uncertain_count", 0))
-        total = meets + fails + uncertain
-        confidence = float(scored.get("confidence", 1.0))
-        if total > 0 and uncertain == total and confidence > 0.5:
-            issues.append(
-                f"Warning: {trial_id} has all UNCERTAIN verdicts but confidence={confidence:.2f}."
-            )
+        total = int(verdict.get("meets_count", 0)) + int(verdict.get("fails_count", 0)) + uncertain
+        if total > 0 and uncertain == total and TIER_ORDER.get(tier, 0) >= TIER_ORDER["moderate"]:
+            issues.append(f"Warning: {trial_id} has all UNCERTAIN verdicts but tier={tier}.")
     return issues

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from clinical_trials import _studies_endpoint_url, search_trials
+from clinical_trials import _studies_endpoint_url, fetch_trial_detail, search_trials
 
 
 def test_studies_endpoint_url_appends_studies_suffix() -> None:
@@ -58,3 +58,30 @@ async def test_search_trials_parses_study_records(monkeypatch: pytest.MonkeyPatc
             "interventions": [],
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_fetch_trial_detail_accepts_studies_wrapped_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_request(_: str, __: dict[str, object]) -> dict[str, object]:
+        return {
+            "studies": [
+                {
+                    "protocolSection": {
+                        "identificationModule": {
+                            "nctId": "NCT999",
+                            "briefTitle": "Detail Trial",
+                        },
+                        "statusModule": {"overallStatus": "RECRUITING"},
+                    }
+                }
+            ]
+        }
+
+    monkeypatch.setattr("clinical_trials._ctgov_request_with_retry", fake_request)
+    result = await fetch_trial_detail("NCT999")
+    assert result["error"] is None
+    assert result["trial"] is not None
+    assert result["trial"]["nct_id"] == "NCT999"
+    assert result["trial"]["brief_title"] == "Detail Trial"

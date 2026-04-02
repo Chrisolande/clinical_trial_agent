@@ -38,7 +38,7 @@ def refine_search_strategy(
             f"Refinement attempt {attempt_num}: broadening search with synonym terms "
             f"{broader_terms[:3]}{trial_count_note}"
         )
-        logger.info("Refine strategy #1: broader terms %s", broader_terms[:3])
+        logger.info("Refine strategy #1: broader terms {}", broader_terms[:3])
 
     elif retry_count == 1:
         # Second retry: include NOT_YET_RECRUITING trials

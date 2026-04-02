@@ -1,0 +1,10 @@
+{
+  "$schema": "https://langgra.ph/schema.json",
+  "dependencies": [
+    "."
+  ],
+  "graphs": {
+    "clinical_trial_agent": "./langgraph_app.py:end_to_end_graph"
+  },
+  "env": ".env"
+}

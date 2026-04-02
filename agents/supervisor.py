@@ -160,7 +160,9 @@ class SupervisorOrchestrator:
         config: RunnableConfig | None = None
         if thread_id:
             config = {"configurable": {"thread_id": f"{thread_id}:synthesis"}}
-        return await compiled_synthesis_graph.ainvoke(synthesis_input, config=config)
+        return cast(
+            "dict[str, Any]", await compiled_synthesis_graph.ainvoke(synthesis_input, config=config)
+        )
 
     async def ainvoke(
         self,
@@ -230,9 +232,10 @@ class SupervisorOrchestrator:
     ) -> dict[str, Any]:
         run_state = SupervisorRunState(retrieval_result={}, scored_trials=[], final_result={})
         retry_count = 0
+        max_attempts = 1 if settings.one_pass_mode else settings.max_retry_attempts
         eligibility: dict[str, Any] = {}
 
-        while retry_count < settings.max_retry_attempts:
+        while retry_count < max_attempts:
             raw_retrieval = await self.run_retrieval(
                 patient_profile=patient_profile,
                 retry_count=retry_count,
@@ -252,18 +255,15 @@ class SupervisorOrchestrator:
             run_state.scored_trials = self._compress_scored_trials(
                 list(eligibility.get("trial_scores", []))
             )
+            if settings.one_pass_mode:
+                break
             if not bool(eligibility.get("retrieval_needs_broadening", False)):
                 break
             retry_count += 1
 
-        synthesis_input_trials: list[ScoredTrialSummary] = [
-            t
-            for t in run_state.scored_trials
-            if float(t.get("score", 0.0)) >= settings.min_match_score
-        ]
         synthesis = await self.run_synthesis(
             patient_profile=patient_profile,
-            trial_scores=synthesis_input_trials,
+            trial_scores=run_state.scored_trials,
             eligibility_verdicts=eligibility.get("eligibility_verdicts"),
             missing_info_recommendations=eligibility.get("missing_info_recommendations"),
             trials_raw=list(run_state.retrieval_result.get("trials_raw", [])),
@@ -353,8 +353,11 @@ class SupervisorOrchestrator:
             "overall_status",
             "phase",
             "score",
-            "confidence",
             "tier",
+            "major_criteria_assessable",
+            "key_concern",
+            "critical_missing_info",
+            "rationale",
             "meets_count",
             "fails_count",
             "uncertain_count",

@@ -9,6 +9,7 @@ from langchain_deepseek import ChatDeepSeek
 from pydantic import SecretStr
 
 _DEFAULT_DB_URI = "postgresql://postgres:postgres@localhost:5432/postgres"
+TIER_ORDER: dict[str, int] = {"disqualified": 0, "weak": 1, "moderate": 2, "strong": 3}
 
 
 def _as_bool(value: str | None, *, default: bool = False) -> bool:
@@ -57,8 +58,7 @@ class Settings:
     retry_min_wait_seconds: float
     retry_max_wait_seconds: float
     retry_jitter: float
-    viable_trial_threshold: int
-    min_match_score: float
+    min_match_tier: str
     criteria_text_max_chars: int
     use_cache: bool
     database_uri: str
@@ -78,6 +78,11 @@ class Settings:
     llm_call_timeout_seconds: float
     retrieval_internal_max_retries: int
     max_trials_for_eligibility: int
+    one_pass_mode: bool
+    tavily_api_key: str
+    tavily_max_results: int
+    tavily_max_trials_to_enrich: int
+    tavily_enable_ctgov_supplement: bool
     max_retry_attempts: int = 5
 
 
@@ -92,8 +97,7 @@ def load_settings() -> Settings:
         retry_min_wait_seconds=float(os.getenv("RETRY_MIN_WAIT_SECONDS", "1.0")),
         retry_max_wait_seconds=float(os.getenv("RETRY_MAX_WAIT_SECONDS", "30.0")),
         retry_jitter=float(os.getenv("RETRY_JITTER", "0.5")),
-        viable_trial_threshold=int(os.getenv("VIABLE_TRIAL_THRESHOLD", "3")),
-        min_match_score=float(os.getenv("MIN_MATCH_SCORE", "0.3")),
+        min_match_tier=os.getenv("MIN_MATCH_TIER", "moderate"),
         criteria_text_max_chars=int(os.getenv("CRITERIA_TEXT_MAX_CHARS", "8000")),
         use_cache=_as_bool(os.getenv("USE_CACHE"), default=True),
         database_uri=database_uri,
@@ -111,13 +115,22 @@ def load_settings() -> Settings:
         supervisor_use_react=_as_bool(os.getenv("SUPERVISOR_USE_REACT"), default=False),
         supervisor_agent_timeout_seconds=float(os.getenv("SUPERVISOR_AGENT_TIMEOUT_SECONDS", "45")),
         llm_call_timeout_seconds=float(os.getenv("LLM_CALL_TIMEOUT_SECONDS", "20")),
-        retrieval_internal_max_retries=int(os.getenv("RETRIEVAL_INTERNAL_MAX_RETRIES", "1")),
+        retrieval_internal_max_retries=int(os.getenv("RETRIEVAL_INTERNAL_MAX_RETRIES", "0")),
         max_trials_for_eligibility=int(
             os.getenv(
                 "MAX_TRIALS_FOR_ELIGIBILITY",
                 os.getenv("MAX_TRIALS_PER_QUERY", "10"),
             )
         ),
+        one_pass_mode=_as_bool(os.getenv("ONE_PASS_MODE"), default=True),
+        tavily_api_key=os.getenv("TAVILY_API_KEY", ""),
+        tavily_max_results=int(os.getenv("TAVILY_MAX_RESULTS", "3")),
+        tavily_max_trials_to_enrich=int(os.getenv("TAVILY_MAX_TRIALS_TO_ENRICH", "8")),
+        tavily_enable_ctgov_supplement=_as_bool(
+            os.getenv("TAVILY_ENABLE_CTGOV_SUPPLEMENT"),
+            default=True,
+        ),
+        max_retry_attempts=int(os.getenv("MAX_RETRY_ATTEMPTS", "1")),
     )
 
 
@@ -130,5 +143,7 @@ def get_llm() -> Any:
     return ChatDeepSeek(
         model=settings.deepseek_model,
         temperature=0.0,
+        timeout=settings.llm_call_timeout_seconds,
+        max_retries=0,
         api_key=SecretStr(settings.deepseek_api_key),
     )

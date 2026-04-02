@@ -11,49 +11,56 @@ from prompts.criteria_parser import build_criteria_parser_prompt
 from tools import cache
 from tools.retry import llm_retry
 
+_PROMPT: ChatPromptTemplate = ChatPromptTemplate.from_template(build_criteria_parser_prompt())
+_CHAIN: Any = None
+
+
+def _get_chain() -> Any:
+    global _CHAIN
+    if _CHAIN is None:
+        _CHAIN = _PROMPT | get_llm().with_structured_output(ParsedEligibilityCriterion)
+    return _CHAIN
+
 
 async def parse_eligibility_criteria(eligibility_text: str, nct_id: str) -> dict[str, Any]:
     if not eligibility_text or len(eligibility_text) < 20:
         return {"inclusion_criteria": [], "exclusion_criteria": []}
 
-    prompt = ChatPromptTemplate.from_template(build_criteria_parser_prompt())
-    structured_llm = get_llm().with_structured_output(ParsedEligibilityCriterion)
-
-    chain = prompt | structured_llm
-
     cache_params = {
         "nct_id": nct_id,
         "eligibility_criteria_raw": eligibility_text[: settings.criteria_text_max_chars],
     }
+
     if settings.use_cache:
-        cached = cache.get_cached("criteria_parser", cache_params)
+        cached = await asyncio.to_thread(cache.get_cached, "criteria_parser", cache_params)
         if isinstance(cached, dict):
             return cached
+
     try:
-        parsed_obj = await _invoke_criteria_llm(chain, cache_params)
+        parsed_obj = await _invoke_criteria_llm(_get_chain(), cache_params)
         result = parsed_obj.model_dump()
         parsed = _assign_ids(result, nct_id)
 
         if settings.use_cache:
-            cache.set_cached("criteria_parser", cache_params, parsed)
+            await asyncio.to_thread(cache.set_cached, "criteria_parser", cache_params, parsed)
 
         return parsed
-    except Exception as exc:
-        logger.error("Criteria parsing failed for %s: %s", nct_id, exc)
+
+    except Exception:
+        logger.exception("Criteria parsing failed for {}", nct_id)
         return {"inclusion_criteria": [], "exclusion_criteria": []}
 
 
 @llm_retry
 async def _invoke_criteria_llm(chain: Any, inputs: dict[str, Any]) -> ParsedEligibilityCriterion:
-    result = await asyncio.wait_for(
-        chain.ainvoke(
-            inputs,
-            config={"run_name": "criteria_parse", "tags": ["eligibility", "parse"]},
-        ),
-        timeout=settings.llm_call_timeout_seconds,
+    result = await chain.ainvoke(
+        inputs,
+        config={"run_name": "criteria_parse", "tags": ["eligibility", "parse"]},
     )
-    if not result:
-        raise ValueError(f"Unexpected criteria parser result type: {type(result)}")
+
+    if result is None:
+        raise ValueError("LLM returned None for criteria parse")
+
     return cast("ParsedEligibilityCriterion", result)
 
 
@@ -78,12 +85,23 @@ def _assign_ids(
 async def parse_criteria_for_trials(
     trials: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    results = []
-    for trial in trials:
-        nct_id = trial.get("nct_id", "unknown")
-        raw_criteria = trial.get("eligibility_criteria_raw", "")
+    tasks = [
+        parse_eligibility_criteria(
+            trial.get("eligibility_criteria_raw", "") or "",
+            trial.get("nct_id", "unknown"),
+        )
+        for trial in trials
+    ]
 
-        parsed = await parse_eligibility_criteria(raw_criteria or "", nct_id)
+    results_parsed = await asyncio.gather(*tasks, return_exceptions=True)
+
+    results = []
+    for trial, parsed in zip(trials, results_parsed, strict=False):
+        if isinstance(parsed, BaseException):
+            logger.exception(
+                "gather task failed for {}: {}", trial.get("nct_id", "unknown"), parsed
+            )
+            parsed = {"inclusion_criteria": [], "exclusion_criteria": []}
 
         results.append(
             {
@@ -92,4 +110,5 @@ async def parse_criteria_for_trials(
                 "exclusion_criteria": parsed.get("exclusion_criteria", []),
             }
         )
+
     return results

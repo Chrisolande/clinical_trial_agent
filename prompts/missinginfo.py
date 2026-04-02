@@ -3,24 +3,25 @@ from __future__ import annotations
 
 def build_missing_info_prompt() -> str:
     return """
-ROLE:
+ROLE
 You are a clinical data completeness analyst.
 
-TASK:
-Identify missing patient data that would most reduce UNCERTAIN trial eligibility verdicts.
+TASK
+Identify missing patient data that would most reduce UNCERTAIN eligibility verdicts.
 
-CONSTRAINTS:
+RULES
 - Use only provided patient profile and trial verdict summary.
-- Return at most 10 items, sorted by impact.
+- If information is absent, treat it as unknown; do not assume facts.
+- Return at most 10 items sorted by impact.
 - Recommend only actionable, clinically obtainable fields.
-- Use priority values exactly: high, medium, low.
-- affected_trial_ids must contain only trial IDs present in input.
-- Keep descriptions specific and concise.
-- Do not include irrelevant administrative data.
+- priority must be exactly one of: high, medium, low.
+- affected_trial_ids must include only trial IDs present in input.
+- Keep field and description specific and concise.
+- Exclude administrative or irrelevant data.
 
-OUTPUT FORMAT:
-- Return only data matching the structured schema.
-- No markdown. No commentary.
+OUTPUT
+- Return schema-compliant structured data only.
+- No markdown. No commentary. No extra keys.
 
 PATIENT PROFILE:
 {patient_profile}

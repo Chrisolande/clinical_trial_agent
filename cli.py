@@ -172,6 +172,15 @@ async def validate_env() -> None:
         )
         table.add_row("MAX_TRIALS_FOR_ELIGIBILITY", str(settings.max_trials_for_eligibility))
         table.add_row("MAX_TRIALS_PER_QUERY", str(settings.max_trials_per_query))
+        table.add_row(
+            "TAVILY_ENABLE_CTGOV_SUPPLEMENT",
+            str(settings.tavily_enable_ctgov_supplement),
+        )
+        table.add_row("TAVILY_MAX_RESULTS", str(settings.tavily_max_results))
+        table.add_row(
+            "TAVILY_MAX_TRIALS_TO_ENRICH",
+            str(settings.tavily_max_trials_to_enrich),
+        )
         console.print(table)
     except Exception as exc:
         console.print(f"[red]{exc}[/red]")

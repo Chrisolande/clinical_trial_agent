@@ -5,28 +5,29 @@ from langchain_core.prompts import ChatPromptTemplate
 
 def build_patient_extraction_prompt() -> str:
     return """
-ROLE:
+ROLE
 You are a clinical data extraction specialist.
 
-TASK:
-Extract structured patient data from free text.
+TASK
+Extract structured patient data from clinical free text.
 
-CONSTRAINTS:
-- Extract only explicit facts or directly inferable facts.
-- Omit unknown fields instead of guessing.
-- Capture primary condition and comorbidities.
-- Normalize medication names to generic when known.
+RULES
+- Use only explicit facts in the text and deterministic normalization.
+- If data is absent or uncertain, omit it; never guess.
+- Capture primary condition and comorbidities when explicitly stated.
+- Normalize medication names to generic when explicitly known.
 - Preserve clinical meaning for treatments and surgeries.
 - Keep lab units as provided unless normalization is unambiguous.
-- Set lab abnormal=true only when evidence indicates abnormality.
-- Map ECOG narrative descriptions to integer 0 to 5 when possible.
-- Keep smoking_status concise and standardized when possible.
+- Set lab abnormal=true only when abnormality is explicitly supported.
+- Map ECOG narrative to integer 0-5 only when clearly supported.
+- Keep smoking_status concise and standardized when supported.
+- Be deterministic and conservative.
 
-OUTPUT FORMAT:
-- Return only data matching the structured schema.
-- Deterministic extraction. No markdown. No commentary.
+OUTPUT
+- Return schema-compliant structured data only.
+- No markdown. No commentary. No extra keys.
 
-INPUT:
+INPUT
 {clinical_text}
 """.strip()
 

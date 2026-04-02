@@ -66,7 +66,7 @@ async def normalize_terminology(patient_profile: dict[str, Any]) -> dict[str, ob
         return _fallback_terminology([], [])
     try:
         result: NormalisedTerminology = await _invoke_terminology_llm(conditions, medications)
-        return result.model_dump()
+        return cast("dict[str, object]", result.model_dump())
     except Exception as exc:
         logger.error("Terminology normalisation failed after retries: {}", exc)
     return _fallback_terminology(conditions, medications)
