@@ -8,13 +8,13 @@ from typing import Any, cast
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from config import settings
+from config import get_settings
 from loguru import logger
 from pydantic import BaseModel, Field
 
 _CTGOV_HEADERS: dict[str, str] = {
-    "User-Agent": settings.ctgov_user_agent,
-    "Accept": settings.ctgov_accept,
+    "User-Agent": get_settings().ctgov_user_agent,
+    "Accept": get_settings().ctgov_accept,
 }
 
 
@@ -58,14 +58,14 @@ def _urllib_get_json(url: str, params: dict[str, Any], timeout: float = 30.0) ->
 
 async def _ctgov_request_with_retry(url: str, params: dict[str, Any]) -> dict[str, Any]:
     last_exc: Exception | None = None
-    for attempt in range(settings.ctgov_retry_attempts):
+    for attempt in range(get_settings().ctgov_retry_attempts):
         try:
             return await asyncio.to_thread(_urllib_get_json, url, params, 30.0)
         except Exception as exc:
             last_exc = exc
             logger.warning("CT.gov request attempt {} failed: {}", attempt + 1, exc)
-            if attempt < settings.ctgov_retry_attempts - 1:
-                await asyncio.sleep(settings.ctgov_retry_backoff_base**attempt)
+            if attempt < get_settings().ctgov_retry_attempts - 1:
+                await asyncio.sleep(get_settings().ctgov_retry_backoff_base ** attempt)
     if last_exc is not None:
         raise last_exc
     raise RuntimeError("ClinicalTrials.gov request failed without a captured exception")
@@ -203,7 +203,7 @@ async def search_trials(
 
     try:
         data = await _ctgov_request_with_retry(
-            _studies_endpoint_url(settings.ctgov_base_url), params
+            _studies_endpoint_url(get_settings().ctgov_base_url), params
         )
         studies_raw = _extract_studies(data)
         studies = [parse_trial_from_response(study) for study in studies_raw]
@@ -223,7 +223,7 @@ async def search_trials(
 
 async def fetch_trial_detail(nct_id: str) -> dict[str, Any]:
     """Fetch a single trial by NCT ID."""
-    url = f"{_studies_endpoint_url(settings.ctgov_base_url)}/{nct_id}"
+    url = f"{_studies_endpoint_url(get_settings().ctgov_base_url)}/{nct_id}"
     try:
         data = await _ctgov_request_with_retry(url, {"format": "json"})
         study = _extract_single_study(data)

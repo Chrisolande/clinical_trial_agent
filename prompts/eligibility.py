@@ -15,11 +15,11 @@ RULES
 - Evaluate criteria one-by-one against exact criterion text.
 - Disqualification is absolute: if any hard exclusion is clearly triggered, set match_tier="disqualified" and match_score=0.0.
 - Major criteria are diagnosis, biomarker status, stage/extent, performance status, prior treatment line/agents, and measurable disease.
-- If any major criterion is not assessable, set major_criteria_assessable=false, match_score<=0.55, and do not use tier "strong".
-- If two or more major criteria are uncertain, set match_score<=0.35 and tier must be "weak" or "disqualified".
-- If >50% of criteria are uncertain, tier must be "weak" or "disqualified".
-- "strong" requires no triggered exclusions, no uncertain exclusions, and no meaningful uncertainty on major criteria.
-- Be deterministic and conservative; avoid overclaiming eligibility.
+- If any major criterion is not assessable, set major_criteria_assessable=false, match_score<=0.65, and do not use tier "strong".
+- If two or more major criteria are uncertain, set match_score<=0.55 and do not use tier "strong".
+- If >50% of criteria are uncertain, do not use tier "strong"; prefer "moderate" when no clear failures are present.
+- "strong" requires no triggered exclusions, no uncertain exclusions, and minimal uncertainty on major criteria.
+- Be conservative, but avoid unnecessary downgrades when available evidence supports a moderate match.
 
 OUTPUT
 - Return valid JSON only. No prose. No markdown.

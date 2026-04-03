@@ -13,6 +13,7 @@ from .nodes import (
     evaluate_trial_worker,
     fan_out_trials,
     identify_missing_info,
+    set_llm_semaphore,
 )
 from .state import (
     EligibilityInput,
@@ -21,6 +22,9 @@ from .state import (
 )
 
 bootstrap_environment()
+
+_LLM_SEMAPHORE = asyncio.Semaphore(5)
+set_llm_semaphore(_LLM_SEMAPHORE)
 
 
 def _build_eligibility_graph() -> StateGraph:
@@ -79,3 +83,6 @@ if __name__ == "__main__":
     app = compile_eligibility_graph(use_postgres_checkpointer=True)
     result = asyncio.run(app.ainvoke(input_data))
     print(result)
+
+
+compiled_eligibility_graph = _build_eligibility_graph().compile()

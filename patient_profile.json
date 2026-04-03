@@ -1,18 +1,139 @@
 {
   "_notice": "SYNTHETIC DATA ONLY. This file is a test fixture. Never replace with real patient data.",
+
   "age": 34,
   "sex": "female",
-  "primary_condition": "colorectal adenocarcinoma",
-  "stage": "III",
-  "medications": [
-    "fluorouracil",
-    "leucovorin",
-    "oxaliplatin"
-  ],
-  "biomarkers": [
-    "KRAS wild-type",
-    "NRAS wild-type",
+  "weight_kg": 62.0,
+  "height_cm": 165.0,
+  "bmi": 22.8,
+
+  "primary_condition": "stage IV metastatic colorectal adenocarcinoma (sigmoid primary)",
+
+  "conditions": [
+    "stage IV metastatic colorectal adenocarcinoma",
+    "liver metastases",
+    "lung metastases",
+    "RECIST v1.1 measurable disease (largest hepatic lesion 3.2 cm, CT 2026-03-15)",
+    "MSI-High / dMMR colorectal cancer",
+    "RAS wild-type (KRAS wild-type, NRAS wild-type)",
     "BRAF wild-type",
-    "MSI-High"
-  ]
+    "HER2-negative",
+    "TMB-high",
+    "grade 1 peripheral neuropathy (residual from prior oxaliplatin)"
+  ],
+
+  "medical_history": [
+    "sigmoid colon resection 2023-11-05, R0, curative intent",
+    "no prior radiotherapy",
+    "no brain metastases",
+    "no CNS metastasis history",
+    "no cardiovascular disease",
+    "no myocardial infarction history",
+    "no cerebrovascular accident history",
+    "no ILD or pneumonitis history",
+    "no autoimmune disease",
+    "no active infection",
+    "no GI obstruction",
+    "no other malignancy history",
+    "no bleeding or coagulation disorder",
+    "HIV negative, HBV negative, HCV negative",
+    "TB negative, syphilis negative",
+    "all prior treatment toxicities resolved to grade 1 or baseline",
+    "no major surgery within 28 days",
+    "no radiotherapy within 28 days",
+    "no prior investigational therapy",
+    "no concurrent investigational therapy",
+    "no QT-prolonging medications",
+    "no MRI contraindications",
+    "not pregnant (negative pregnancy test 2026-03-28)",
+    "not breastfeeding",
+    "using highly effective contraception (hormonal IUD)",
+    "willing to use contraception throughout trial participation",
+    "informed consent capable",
+    "vaccinations up to date including COVID-19",
+    "DPD deficiency: negative",
+    "BOLD-100 exposure: none",
+    "life expectancy approximately 18 months per oncologist assessment"
+  ],
+
+  "family_history": [
+    "mother: breast cancer diagnosed age 58",
+    "maternal uncle: colon cancer diagnosed age 61"
+  ],
+
+  "medications": [
+    {
+      "name": "hormonal IUD (levonorgestrel)",
+      "generic_name": "levonorgestrel",
+      "dose": "52 mg",
+      "frequency": "in situ",
+      "drug_class": "progestin intrauterine device"
+    },
+    {
+      "name": "ondansetron (PRN)",
+      "generic_name": "ondansetron",
+      "dose": "8 mg",
+      "frequency": "as needed for nausea",
+      "drug_class": "5-HT3 antagonist antiemetic"
+    }
+  ],
+
+  "allergies": [
+    "no known drug allergies"
+  ],
+
+  "contraindications": [
+    "prior fluorouracil exposure (adjuvant and metastatic settings)",
+    "prior oxaliplatin exposure (grade 2 neuropathy, now grade 1)",
+    "prior irinotecan exposure",
+    "prior bevacizumab exposure",
+    "prior pembrolizumab exposure (second-line metastatic, progressive disease)"
+  ],
+
+  "lab_values": [
+    { "name": "ANC", "value": 2100, "unit": "/mcL", "reference_range": ">=1500/mcL", "abnormal": false },
+    { "name": "Hemoglobin", "value": 10.8, "unit": "g/dL", "reference_range": ">=9 g/dL", "abnormal": false },
+    { "name": "Platelets", "value": 187000, "unit": "/mcL", "reference_range": ">=100000/mcL", "abnormal": false },
+    { "name": "INR", "value": 1.1, "unit": "", "reference_range": "<=1.6", "abnormal": false },
+    { "name": "Total bilirubin", "value": 0.7, "unit": "mg/dL", "reference_range": "<=1.5x ULN", "abnormal": false },
+    { "name": "AST", "value": 38, "unit": "U/L", "reference_range": "<=3x ULN", "abnormal": false },
+    { "name": "ALT", "value": 42, "unit": "U/L", "reference_range": "<=3x ULN", "abnormal": false },
+    { "name": "Albumin", "value": 3.6, "unit": "g/dL", "reference_range": ">=3.0 g/dL", "abnormal": false },
+    { "name": "Creatinine", "value": 0.82, "unit": "mg/dL", "reference_range": "<=1.5x ULN", "abnormal": false },
+    { "name": "GFR", "value": 88, "unit": "mL/min", "reference_range": ">=50 mL/min", "abnormal": false },
+    { "name": "QTc", "value": 420, "unit": "ms", "reference_range": "<=470 ms", "abnormal": false },
+    { "name": "Ejection fraction", "value": 62, "unit": "%", "reference_range": ">=50%", "abnormal": false }
+  ],
+
+  "biomarkers": [
+    { "name": "KRAS", "result": "wild-type", "method": "next-generation sequencing" },
+    { "name": "NRAS", "result": "wild-type", "method": "next-generation sequencing" },
+    { "name": "BRAF", "result": "wild-type (V600E negative)", "method": "next-generation sequencing" },
+    { "name": "MSI status", "result": "MSI-High", "method": "PCR" },
+    { "name": "MMR status", "result": "dMMR (deficient mismatch repair)", "method": "immunohistochemistry" },
+    { "name": "HER2", "result": "negative (IHC 1+)", "method": "immunohistochemistry" },
+    { "name": "TMB", "result": "high (18 mut/Mb)", "method": "next-generation sequencing" },
+    { "name": "PD-L1 CPS", "result": "12", "method": "immunohistochemistry (22C3)" },
+    { "name": "RAS", "result": "wild-type", "method": "next-generation sequencing" }
+  ],
+
+  "ecog_performance_status": 1,
+
+  "smoking_status": "never smoker",
+  "alcohol_use": "occasional, fewer than 2 units per week",
+
+  "prior_treatments": [
+    "Line 1 adjuvant: FOLFOX (fluorouracil + leucovorin + oxaliplatin), 2024-01-10 to 2024-07-20, complete response, completed planned cycles",
+    "Line 2 metastatic first-line: FOLFIRI + bevacizumab (fluorouracil + leucovorin + irinotecan + bevacizumab), 2025-02-01 to 2025-11-15, partial response then progressive disease, stopped for progression",
+    "Line 3 metastatic second-line: pembrolizumab monotherapy, 2025-12-01 to 2026-02-28, progressive disease, stopped for progression",
+    "Anti-EGFR therapy: none (RAS wild-type, not yet received cetuximab or panitumumab)",
+    "No prior BOLD-100 exposure",
+    "No prior enrollment in investigational studies"
+  ],
+
+  "prior_surgeries": [
+    "Sigmoid colon resection 2023-11-05, R0 resection, curative intent, no complications"
+  ],
+
+  "additional_notes": "34-year-old female with stage IV metastatic colorectal adenocarcinoma (sigmoid primary, liver and lung metastases). MSI-High / dMMR tumour with wild-type RAS and BRAF, HER2-negative, TMB-high. Progressed through three prior lines: adjuvant FOLFOX, first-line metastatic FOLFIRI+bevacizumab, and second-line pembrolizumab monotherapy. ECOG PS 1. Adequate organ function confirmed on labs collected 2026-03-28. Measurable disease per RECIST v1.1 confirmed on CT 2026-03-15. Not anti-EGFR exposed. Seeking third-line or later clinical trial options. All prior toxicities resolved to grade 1 or baseline. Grade 1 peripheral neuropathy persists from prior oxaliplatin."
 }

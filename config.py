@@ -4,7 +4,7 @@ import functools
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import SecretStr
 from tools.llm_factory import build_llm_client, is_local_provider
@@ -88,15 +88,20 @@ class Settings:
     max_retry_attempts: int = 5
 
 
+def _normalize_provider(provider: str) -> Literal["deepseek", "openai", "anthropic", "ollama"]:
+    normalized = provider.strip().lower()
+    if normalized in {"deepseek", "openai", "anthropic", "ollama"}:
+        return cast('Literal["deepseek", "openai", "anthropic", "ollama"]', normalized)
+    return "deepseek"
+
+
 def load_settings() -> Settings:
     bootstrap_environment()
     database_uri = os.getenv("DATABASE_URI", _DEFAULT_DB_URI)
     memory_dsn = os.getenv("MEMORY_DB_DSN", database_uri)
-    provider = os.getenv("LLM_PROVIDER", "deepseek").strip().lower()
+    provider = _normalize_provider(os.getenv("LLM_PROVIDER", "deepseek"))
     return Settings(
-        llm_provider=provider
-        if provider in {"deepseek", "openai", "anthropic", "ollama"}
-        else "deepseek",
+        llm_provider=provider,
         deepseek_api_key=SecretStr(os.getenv("DEEPSEEK_API_KEY", "")),
         deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
         retry_max_attempts=int(os.getenv("RETRY_MAX_ATTEMPTS", "3")),
@@ -120,7 +125,7 @@ def load_settings() -> Settings:
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
         supervisor_use_react=_as_bool(os.getenv("SUPERVISOR_USE_REACT"), default=False),
         supervisor_agent_timeout_seconds=float(os.getenv("SUPERVISOR_AGENT_TIMEOUT_SECONDS", "45")),
-        llm_call_timeout_seconds=float(os.getenv("LLM_CALL_TIMEOUT_SECONDS", "20")),
+        llm_call_timeout_seconds=float(os.getenv("LLM_CALL_TIMEOUT_SECONDS", "60")),
         retrieval_internal_max_retries=int(os.getenv("RETRIEVAL_INTERNAL_MAX_RETRIES", "0")),
         max_trials_for_eligibility=int(
             os.getenv(

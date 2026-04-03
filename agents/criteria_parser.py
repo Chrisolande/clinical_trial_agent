@@ -4,7 +4,7 @@ import asyncio
 import re
 from typing import Any, Literal, cast
 
-from config import get_llm, settings
+from config import get_llm, get_settings
 from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
 from models.criteria import EligibilityCriterion, ParsedEligibilityCriterion
@@ -17,6 +17,14 @@ CriterionCategoryLiteral = Literal[
 ]
 
 _PROMPT: ChatPromptTemplate = ChatPromptTemplate.from_template(build_criteria_parser_prompt())
+_CATEGORY_KEYWORDS: tuple[tuple[CriterionCategoryLiteral, tuple[str, ...]], ...] = (
+    ("age", ("age", "year", "yo")),
+    ("biomarker", ("egfr", "braf", "alk", "pd-l1", "mutation", "biomarker")),
+    ("lab", ("creatinine", "bilirubin", "ast", "alt", "hemoglobin", "platelet", "wbc", "ldh")),
+    ("performance", ("ecog", "karnofsky", "performance")),
+    ("diagnosis", ("diagnosis", "histology", "pathology", "metastatic", "stage")),
+    ("medication", ("treatment", "therapy", "drug", "medication", "immunotherapy", "chemotherapy")),
+)
 
 
 def _get_chain() -> Any:
@@ -24,26 +32,15 @@ def _get_chain() -> Any:
     return _PROMPT | get_llm().with_structured_output(ParsedEligibilityCriterion)
 
 
+def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
+    return any(keyword in text for keyword in keywords)
+
+
 def _infer_category(text: str) -> CriterionCategoryLiteral:
     lowered = text.lower()
-    if any(k in lowered for k in ["age", "year", "yo"]):
-        return "age"
-    if any(k in lowered for k in ["egfr", "braf", "alk", "pd-l1", "mutation", "biomarker"]):
-        return "biomarker"
-    if any(
-        k in lowered
-        for k in ["creatinine", "bilirubin", "ast", "alt", "hemoglobin", "platelet", "wbc", "ldh"]
-    ):
-        return "lab"
-    if any(k in lowered for k in ["ecog", "karnofsky", "performance"]):
-        return "performance"
-    if any(k in lowered for k in ["diagnosis", "histology", "pathology", "metastatic", "stage"]):
-        return "diagnosis"
-    if any(
-        k in lowered
-        for k in ["treatment", "therapy", "drug", "medication", "immunotherapy", "chemotherapy"]
-    ):
-        return "medication"
+    for category, keywords in _CATEGORY_KEYWORDS:
+        if _contains_any(lowered, keywords):
+            return category
     return cast("CriterionCategoryLiteral", "other")
 
 
@@ -120,10 +117,10 @@ async def parse_eligibility_criteria(eligibility_text: str, nct_id: str) -> dict
 
     cache_params = {
         "nct_id": nct_id,
-        "eligibility_criteria_raw": eligibility_text[: settings.criteria_text_max_chars],
+        "eligibility_criteria_raw": eligibility_text[: get_settings().criteria_text_max_chars],
     }
 
-    if settings.use_cache:
+    if get_settings().use_cache:
         cached = await asyncio.to_thread(cache.get_cached, "criteria_parser", cache_params)
         if isinstance(cached, dict):
             return cached
@@ -135,7 +132,7 @@ async def parse_eligibility_criteria(eligibility_text: str, nct_id: str) -> dict
         result = parsed_obj.model_dump()
         parsed = _assign_ids(result, nct_id)
 
-        if settings.use_cache:
+        if get_settings().use_cache:
             await asyncio.to_thread(cache.set_cached, "criteria_parser", cache_params, parsed)
 
         return parsed

@@ -1,45 +1,18 @@
 from __future__ import annotations
 
-import asyncio
-from collections import Counter, defaultdict
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any
 
-from config import TIER_ORDER, get_llm, settings
-from langchain_core.prompts import ChatPromptTemplate
-from loguru import logger
-from prompts.synthesis import build_synthesis_prompt
-from pydantic import BaseModel, Field
-from tools.retry import llm_retry
+from config import TIER_ORDER
 
+from .report_formatter import build_text_report
+from .report_synthesizer import generate_executive_summary
 
-class ExecutiveSummaryModel(BaseModel):
-    executive_summary: str = Field(
-        description="A 150-250 word physician-level executive summary of the trial matches."
-    )
-    patient_summary: str = Field(
-        description="A concise 1-sentence demographic and clinical description of the patient"
-    )
-
-
-def _count_tiers(scored_trials: list[dict[str, Any]]) -> tuple[int, int, int, int]:
-    tiers = Counter(str(t.get("tier", "weak")) for t in scored_trials)
-    return (
-        tiers["strong"],
-        tiers["moderate"],
-        tiers["weak"],
-        tiers["disqualified"],
-    )
-
-
-def _describe_patient(patient_profile: dict[str, Any]) -> str:
-    conds = patient_profile.get("conditions", [])
-    primary = patient_profile.get("primary_condition") or (
-        conds[0] if conds else "unknown condition"
-    )
-    age = patient_profile.get("age", "unknown age")
-    sex = patient_profile.get("sex", "")
-    return f"{age} year old {sex} patient with {primary}".strip()
+_METHODOLOGY_NOTE = (
+    "This report uses an LLM-as-judge eligibility assessment with conservative tiering. "
+    "Strong matches require confidence on major criteria and no disqualifying exclusion triggers. "
+    "Weak/disqualified trials are excluded from the main body."
+)
 
 
 def _severity_for_missing_item(item: str, tier: str) -> str:
@@ -94,16 +67,6 @@ def _collect_information_gaps(scored_trials: list[dict[str, Any]]) -> list[dict[
     )
 
 
-def _merge_information_gaps(
-    scored_trials: list[dict[str, Any]],
-    missing_info: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    merged = _collect_information_gaps(scored_trials)
-    if missing_info:
-        merged.extend(missing_info)
-    return _deduplicate_gaps(merged)
-
-
 def _deduplicate_gaps(gaps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen: dict[str, dict[str, Any]] = {}
     priority_rank = {"high": 3, "medium": 2, "low": 1}
@@ -121,10 +84,19 @@ def _deduplicate_gaps(gaps: list[dict[str, Any]]) -> list[dict[str, Any]]:
         new_priority = str(gap.get("priority", "low")).lower()
         if priority_rank.get(new_priority, 0) > priority_rank.get(current_priority, 0):
             current["priority"] = new_priority
-        current_ids = set(cast("list[str]", current.get("affected_trial_ids", [])))
-        new_ids = set(cast("list[str]", gap.get("affected_trial_ids", [])))
+        current_ids = set(current.get("affected_trial_ids", []))
+        new_ids = set(gap.get("affected_trial_ids", []))
         current["affected_trial_ids"] = sorted(current_ids | new_ids)
     return list(seen.values())
+
+
+def _merge_information_gaps(
+    scored_trials: list[dict[str, Any]], missing_info: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    merged = _collect_information_gaps(scored_trials)
+    if missing_info:
+        merged.extend(missing_info)
+    return _deduplicate_gaps(merged)
 
 
 def _partition_trials(
@@ -135,6 +107,43 @@ def _partition_trials(
     weak = [t for t in enriched_trials if str(t.get("tier", "weak")) == "weak"]
     disqualified = [t for t in enriched_trials if str(t.get("tier", "weak")) == "disqualified"]
     return strong, moderate, weak, disqualified
+
+
+def _build_per_criterion_verdicts(verdict_details: dict[str, Any]) -> list[dict[str, str]]:
+    mapping = {"MEETS": "eligible", "FAILS": "ineligible", "UNCERTAIN": "uncertain"}
+    rows: list[dict[str, str]] = []
+    for item in list(verdict_details.get("verdicts", [])):
+        text = str(item.get("criterion_text", "")).strip()
+        if not text:
+            continue
+        verdict = mapping.get(str(item.get("verdict", "UNCERTAIN")), "uncertain")
+        rows.append(
+            {
+                "criterion_text": text,
+                "verdict": verdict,
+                "reasoning": str(item.get("reasoning", "")),
+            }
+        )
+    return rows
+
+
+def _build_trial_report_entry(
+    trial: dict[str, Any], eligibility_verdicts: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
+    tid = str(trial.get("trial_id", ""))
+    enriched = dict(trial)
+    details = eligibility_verdicts.get(tid, {})
+    enriched["verdict_details"] = details
+    enriched["per_criterion_verdicts"] = _build_per_criterion_verdicts(details)
+    return enriched
+
+
+def _sort_by_tier_then_score(trials: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        trials,
+        key=lambda t: (TIER_ORDER.get(str(t.get("tier", "weak")), 0), float(t.get("score", 0.0))),
+        reverse=True,
+    )
 
 
 def _build_report_payload(
@@ -163,96 +172,8 @@ def _build_report_payload(
         "methodology_note": _METHODOLOGY_NOTE,
         "search_queries_used": list(dict.fromkeys(search_queries)),
         "decision_history": decision_history,
+        "ranked_trials": enriched_trials,
     }
-
-
-def _build_exec_summary_context(
-    patient_profile: dict[str, Any],
-    scored_trials: list[dict[str, Any]],
-) -> dict[str, Any]:
-    strong, moderate, weak, disqualified = _count_tiers(scored_trials)
-    top_trials_summary = "\n".join(
-        f"- {t['brief_title']} ({t['trial_id']}): tier={t['tier']}, score={t['score']:.2f}, concern={t.get('key_concern', '')}"
-        for t in scored_trials[:5]
-    )
-    patient_sum = _describe_patient(patient_profile)
-    return {
-        "patient_summary": patient_sum,
-        "strong_count": strong,
-        "moderate_count": moderate,
-        "excluded_count": weak + disqualified,
-        "total": len(scored_trials),
-        "top_trials": top_trials_summary or "No trials evaluated",
-        "missing_info": "See Information Gaps section.",
-    }
-
-
-@llm_retry
-async def _invoke_exec_summary_llm(chain: Any, context: dict[str, Any]) -> dict[str, Any]:
-    result = await asyncio.wait_for(
-        chain.ainvoke(
-            context,
-            config={"run_name": "executive_summary", "tags": ["synthesis", "report"]},
-        ),
-        timeout=settings.llm_call_timeout_seconds,
-    )
-    if not isinstance(result, ExecutiveSummaryModel):
-        raise ValueError(f"Unexpected report summary result type: {type(result)}")
-    return cast("dict[str, Any]", result.model_dump())
-
-
-async def generate_executive_summary(
-    patient_profile: dict[str, Any],
-    scored_trials: list[dict[str, Any]],
-) -> dict[str, str]:
-    context = _build_exec_summary_context(patient_profile, scored_trials)
-    prompt = ChatPromptTemplate.from_template(build_synthesis_prompt())
-    chain = prompt | get_llm().with_structured_output(ExecutiveSummaryModel)
-
-    try:
-        result = await _invoke_exec_summary_llm(chain, context)
-        return {
-            "executive_summary": result["executive_summary"],
-            "patient_summary": result["patient_summary"],
-        }
-    except Exception as exc:
-        logger.error("Executive summary generation failed after retries: {}", exc)
-
-    return {
-        "executive_summary": (
-            f"Conservative triage completed for {context['total']} trials. "
-            f"Strong: {context['strong_count']}, Moderate: {context['moderate_count']}, "
-            f"Excluded (weak/disqualified): {context['excluded_count']}."
-        ),
-        "patient_summary": context["patient_summary"],
-    }
-
-
-def _build_trial_report_entry(
-    trial: dict[str, Any], eligibility_verdicts: dict[str, dict[str, Any]]
-) -> dict[str, Any]:
-    tid = str(trial.get("trial_id", ""))
-    enriched = dict(trial)
-    enriched["verdict_details"] = eligibility_verdicts.get(tid, {})
-    return enriched
-
-
-_METHODOLOGY_NOTE = (
-    "This report uses an LLM-as-judge eligibility assessment with conservative tiering. "
-    "Strong matches require confidence on major criteria and no disqualifying exclusion triggers. "
-    "Weak/disqualified trials are excluded from the main body."
-)
-
-
-def _sort_by_tier_then_score(trials: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return sorted(
-        trials,
-        key=lambda t: (
-            TIER_ORDER.get(str(t.get("tier", "weak")), 0),
-            float(t.get("score", 0.0)),
-        ),
-        reverse=True,
-    )
 
 
 async def build_report(
@@ -281,188 +202,4 @@ async def build_report(
     )
 
 
-def _render_trial_entry(t: dict[str, Any], *, include_key_concern: bool) -> list[str]:
-    lines = [
-        f"[{t['trial_id']}] {t['brief_title']}",
-        f"Tier: {t.get('tier', 'weak')} | Score: {t['score']:.2f} | "
-        f"Phase: {t.get('phase', 'N/A')} | Status: {t.get('overall_status', 'N/A')}",
-        f"Criteria: {t['meets_count']} met / {t['fails_count']} failed / "
-        f"{t['uncertain_count']} uncertain",
-    ]
-    if include_key_concern and t.get("key_concern"):
-        lines.append(f"Key concern: {t['key_concern']}")
-    lines.append("")
-    return lines
-
-
-def _render_tier_section(
-    report_json: dict[str, Any],
-    key: str,
-    label: str,
-    *,
-    include_key_concern: bool,
-) -> list[str]:
-    trials = report_json.get(key, [])
-    if not trials:
-        return []
-    lines = [f"{label} ({len(trials)}):", "-" * 40]
-    for t in trials:
-        lines.extend(_render_trial_entry(t, include_key_concern=include_key_concern))
-    return lines
-
-
-def _render_information_gaps(info_gaps: list[dict[str, Any]]) -> list[str]:
-    if not info_gaps:
-        return []
-    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for item in info_gaps:
-        grouped[str(item.get("priority", "medium")).upper()].append(item)
-
-    lines = ["INFORMATION GAPS", "-" * 40]
-    for severity in ("HIGH", "MEDIUM", "LOW"):
-        items = grouped.get(severity, [])
-        if not items:
-            continue
-        lines.append(f"{severity}:")
-        for item in items:
-            field = str(item.get("field", "")).strip()
-            desc = str(item.get("description", "")).strip()
-            lines.append(f"- {field}")
-            if desc and desc != field:
-                lines.append(f"  {desc}")
-        lines.append("")
-    return lines
-
-
-def _render_next_actions(info_gaps: list[dict[str, Any]]) -> list[str]:
-    if not info_gaps:
-        return []
-    lines = ["RECOMMENDED CLINICAL NEXT ACTIONS", "-" * 40]
-    high_then_medium = [
-        g for g in info_gaps if str(g.get("priority", "")).lower() in {"high", "medium"}
-    ]
-    high_then_medium = [
-        g
-        for g in high_then_medium
-        if str(g.get("field", "")).strip().lower()
-        not in {
-            "criterion requires details not present in profile",
-            "missing trial-specific clinical detail",
-            "missing exclusion-history detail",
-        }
-    ]
-    for item in high_then_medium[:8]:
-        field = str(item.get("field", "")).strip()
-        desc = str(item.get("description", "")).strip()
-        trials = ", ".join(list(item.get("affected_trial_ids", []))[:3])
-        lines.append(f"- {field}")
-        if desc:
-            lines.append(f"  Action: {desc}")
-        if trials:
-            lines.append(f"  Affects trials: {trials}")
-    lines.append("")
-    return lines
-
-
-def _render_potential_matches(report_json: dict[str, Any]) -> list[str]:
-    strong = list(report_json.get("strong_matches", []))
-    moderate = list(report_json.get("moderate_matches", []))
-    if strong or moderate:
-        return []
-
-    excluded = list(report_json.get("excluded_trials", []))
-    if not excluded:
-        return []
-
-    # Potential candidates: no hard exclusion failures, with some inclusion evidence.
-    candidates = [
-        t
-        for t in excluded
-        if int(t.get("hard_exclusion_failures", 0)) == 0 and int(t.get("meets_count", 0)) > 0
-    ]
-    candidates = sorted(
-        candidates,
-        key=lambda x: (
-            float(x.get("score", 0.0)),
-            int(x.get("meets_count", 0)),
-            -int(x.get("uncertain_count", 0)),
-        ),
-        reverse=True,
-    )[:5]
-    if not candidates:
-        return []
-
-    lines = ["POTENTIAL MATCHES PENDING ADDITIONAL DATA", "-" * 40]
-    for c in candidates:
-        lines.append(
-            f"- [{c.get('trial_id','')}] {c.get('brief_title','')} | "
-            f"score={float(c.get('score',0.0)):.2f} | "
-            f"met={int(c.get('meets_count',0))} uncertain={int(c.get('uncertain_count',0))}"
-        )
-        concern = str(c.get("key_concern", "")).strip()
-        if concern:
-            lines.append(f"  Limitation: {concern}")
-    lines.append("")
-    return lines
-
-
-def build_text_report(report_json: dict[str, Any]) -> str:
-    """Build human-readable text from report JSON."""
-    lines: list[str] = [
-        "=" * 70,
-        "CLINICAL TRIAL MATCHING REPORT",
-        f"Generated: {report_json.get('generated_at', 'N/A')}",
-        "=" * 70,
-        "",
-        "PATIENT: " + report_json.get("patient_summary", ""),
-        "",
-        "EXECUTIVE SUMMARY",
-        "-" * 40,
-        report_json.get("executive_summary", ""),
-        "",
-        f"TRIALS SEARCHED: {report_json.get('total_trials_searched', 0)}  "
-        f"EVALUATED: {report_json.get('total_trials_evaluated', 0)}",
-        "",
-    ]
-
-    lines.extend(
-        _render_tier_section(
-            report_json,
-            "strong_matches",
-            "STRONG MATCHES",
-            include_key_concern=False,
-        )
-    )
-    lines.extend(
-        _render_tier_section(
-            report_json,
-            "moderate_matches",
-            "MODERATE MATCHES",
-            include_key_concern=True,
-        )
-    )
-
-    excluded_count = int(report_json.get("excluded_trial_count", 0))
-    lines.append(
-        f"Appendix: {excluded_count} trials were assessed as weak or disqualified and excluded from this report."
-    )
-    lines.append("")
-
-    lines.extend(_render_potential_matches(report_json))
-
-    gaps = list(report_json.get("information_gaps", []))
-    lines.extend(_render_information_gaps(gaps))
-    lines.extend(_render_next_actions(gaps))
-
-    qa_issues = report_json.get("qa_issues", [])
-    if qa_issues:
-        lines += ["QA ISSUES", "-" * 40] + [f"  - {issue}" for issue in qa_issues] + [""]
-
-    lines += [
-        "METHODOLOGY",
-        "-" * 40,
-        report_json.get("methodology_note", ""),
-        "",
-    ]
-
-    return "\n".join(lines)
+__all__ = ["build_report", "build_text_report"]

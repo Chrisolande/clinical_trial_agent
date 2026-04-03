@@ -1,23 +1,74 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import inspect
 import json
+import os
 from dataclasses import dataclass
 from typing import Any, cast
 
-from config import settings
+from config import TIER_ORDER, get_settings
 from langchain.agents import create_agent
 from langchain_core.runnables import RunnableConfig
 from loguru import logger
 from memory import EpisodicMemory, get_checkpointer
-from subagents.eligibility.graph import compile_eligibility_graph
+from subagents.eligibility.graph import compiled_eligibility_graph
 from subagents.retrieval.graph import compiled_retrieval_graph
 from subagents.synthesis.graph import compiled_synthesis_graph
 
 PatientSummary = dict[str, Any]
 TrialSummary = dict[str, Any]
 ScoredTrialSummary = dict[str, Any]
+
+
+def _apply_feedback_adjustments(
+    scored_trials: list[dict[str, Any]],
+    feedback_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    boosts: dict[str, int] = {}
+    for row in feedback_rows:
+        nct = str(row.get("nct_id", "")).strip()
+        verdict = str(row.get("verdict", "")).strip().lower()
+        if not nct:
+            continue
+        if verdict == "confirmed":
+            boosts[nct] = boosts.get(nct, 0) + 1
+        elif verdict == "rejected":
+            boosts[nct] = boosts.get(nct, 0) - 1
+
+    adjusted = [dict(trial) for trial in scored_trials]
+    for trial in adjusted:
+        trial_id = str(trial.get("trial_id", "")).strip()
+        delta = boosts.get(trial_id, 0)
+        if delta == 0:
+            continue
+        trial["score"] = max(0.0, min(1.0, float(trial.get("score", 0.0)) + 0.05 * delta))
+
+    adjusted.sort(
+        key=lambda x: (
+            TIER_ORDER.get(str(x.get("tier", "weak")), 0),
+            float(x.get("score", 0.0)),
+        ),
+        reverse=True,
+    )
+    for idx, trial in enumerate(adjusted, 1):
+        trial["rank"] = idx
+    return adjusted
+
+
+def _profile_hash_for_feedback(patient_profile: dict[str, Any]) -> str:
+    canonical = json.dumps(patient_profile, sort_keys=True, default=str)
+    salt = os.getenv("PROFILE_HASH_SALT", "")
+    return hashlib.sha256(f"{salt}::{canonical}".encode()).hexdigest()
+
+
+def _compute_tier_counts(scored_trials: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {"strong": 0, "moderate": 0, "weak": 0, "disqualified": 0}
+    for trial in scored_trials:
+        tier = str(trial.get("tier", "weak"))
+        counts[tier] = counts.get(tier, 0) + 1
+    return counts
 
 
 @dataclass
@@ -73,6 +124,7 @@ class SupervisorOrchestrator:
         attempt: int = 0,
     ) -> dict[str, Any]:
         """Run eligibility subgraph over candidate trials and return scored verdicts."""
+        settings = get_settings()
         trimmed_trials = [
             {
                 **trial,
@@ -82,7 +134,6 @@ class SupervisorOrchestrator:
             }
             for trial in trials_deduplicated
         ]
-        eligibility_graph = compile_eligibility_graph(use_postgres_checkpointer=False)
         eligibility_input = {
             "patient_profile": patient_profile,
             "trials_deduplicated": trimmed_trials,
@@ -91,7 +142,7 @@ class SupervisorOrchestrator:
         config: RunnableConfig | None = None
         if thread_id:
             config = {"configurable": {"thread_id": f"{thread_id}:eligibility:{attempt}"}}
-        result = await eligibility_graph.ainvoke(eligibility_input, config=config)
+        result = await compiled_eligibility_graph.ainvoke(eligibility_input, config=config)
         return cast("dict[str, Any]", result)
 
     async def run_synthesis(
@@ -132,58 +183,66 @@ class SupervisorOrchestrator:
         thread_id: str,
         recursion_limit: int = 25,
     ) -> dict[str, Any]:
-        memory = EpisodicMemory()
-        await memory.init()
-        try:
+        if recursion_limit < 1:
+            raise ValueError("recursion_limit must be >= 1")
+
+        memory_ctx = EpisodicMemory()
+        async with memory_ctx:
+            memory = memory_ctx
             cached = await memory.lookup(patient_profile)
             if cached:
                 logger.info("Supervisor served result from episodic memory")
                 return cached
-        finally:
-            await memory.close()
 
-        if recursion_limit < 1:
-            raise ValueError("recursion_limit must be >= 1")
+            patient_summary = self._project_patient_summary(patient_profile)
 
-        patient_summary = self._project_patient_summary(patient_profile)
+            try:
+                react_result = await self._react_agent.ainvoke(
+                    {
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": (
+                                    "Match this patient to trials by calling tools in order: "
+                                    "run_retrieval -> run_eligibility -> run_synthesis.\n"
+                                    f"Patient summary: {patient_summary}"
+                                ),
+                            }
+                        ]
+                    },
+                    config={"configurable": {"thread_id": thread_id}},
+                )
+                extracted = self._extract_final_result(react_result)
+                if isinstance(extracted.get("report_json"), dict):
+                    result = extracted
+                else:
+                    result = await self._run_tools_pipeline(
+                        patient_summary, thread_id=thread_id, memory=memory
+                    )
+            except Exception:
+                result = await self._run_tools_pipeline(
+                    patient_summary, thread_id=thread_id, memory=memory
+                )
 
-        try:
-            react_result = await self._react_agent.ainvoke(
-                {
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": (
-                                "Match this patient to trials by calling tools in order: "
-                                "run_retrieval -> run_eligibility -> run_synthesis.\n"
-                                f"Patient summary: {patient_summary}"
-                            ),
-                        }
-                    ]
-                },
-                config={"configurable": {"thread_id": thread_id}},
-            )
-            extracted = self._extract_final_result(react_result)
-            if isinstance(extracted.get("report_json"), dict):
-                result = extracted
-            else:
-                result = await self._run_tools_pipeline(patient_summary, thread_id=thread_id)
-        except Exception:
-            result = await self._run_tools_pipeline(patient_summary, thread_id=thread_id)
-
-        memory = EpisodicMemory()
-        await memory.init()
-        try:
             await memory.store(patient_profile, result)
-        finally:
-            await memory.close()
-
-        return result
+            tier_counts = _compute_tier_counts(
+                list(result.get("report_json", {}).get("ranked_trials", []))
+            )
+            await memory.write_pipeline_audit(
+                patient_profile=patient_profile,
+                run_id=thread_id,
+                outcome_tier_counts=tier_counts,
+                model_version=get_settings().deepseek_model,
+                consent_flag=os.getenv("CLINICAL_DATA_EXTERNAL_LLM_CONSENT", "false").lower()
+                == "true",
+            )
+            return result
 
     async def _run_tools_pipeline(
-        self, patient_profile: PatientSummary, *, thread_id: str
+        self, patient_profile: PatientSummary, *, thread_id: str, memory: EpisodicMemory
     ) -> dict[str, Any]:
         run_state = SupervisorRunState(retrieval_result={}, scored_trials=[], final_result={})
+        settings = get_settings()
         max_attempts = 1 if settings.one_pass_mode else settings.max_retry_attempts
         eligibility: dict[str, Any] = {}
 
@@ -215,9 +274,14 @@ class SupervisorOrchestrator:
             ):
                 break
 
+        feedback_rows: list[dict[str, Any]] = []
+        if hasattr(memory, "list_feedback"):
+            feedback_rows = await memory.list_feedback(_profile_hash_for_feedback(patient_profile))
+        adjusted_scores = _apply_feedback_adjustments(run_state.scored_trials, feedback_rows)
+
         synthesis = await self.run_synthesis(
             patient_profile=patient_profile,
-            trial_scores=run_state.scored_trials,
+            trial_scores=adjusted_scores,
             eligibility_verdicts=eligibility.get("eligibility_verdicts"),
             missing_info_recommendations=eligibility.get("missing_info_recommendations"),
             trials_raw=list(run_state.retrieval_result.get("trials_raw", [])),
@@ -311,6 +375,7 @@ class SupervisorOrchestrator:
 
     @staticmethod
     def _project_trial_summary(trial: dict[str, Any]) -> TrialSummary:
+        settings = get_settings()
         criteria_text = str(trial.get("eligibility_criteria_raw", ""))[
             : settings.criteria_text_max_chars
         ]
@@ -376,7 +441,7 @@ class SupervisorOrchestrator:
 
 @contextlib.asynccontextmanager
 async def compile_supervisor_graph() -> Any:
-    checkpointer = get_checkpointer(settings.database_uri)
+    checkpointer = get_checkpointer(get_settings().database_uri)
     if checkpointer is not None and hasattr(checkpointer, "__aenter__"):
         async with checkpointer as active_checkpointer:
             setup_result = active_checkpointer.setup()

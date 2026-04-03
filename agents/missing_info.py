@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Any, cast
 
-from config import get_llm, settings
+from config import external_llm_requires_consent, get_llm, get_settings
 from langchain_core.prompts import (
     ChatPromptTemplate,
     HumanMessagePromptTemplate,
@@ -14,6 +15,17 @@ from langchain_core.prompts import (
 from loguru import logger
 from models.missing_info import CompletenessAssessmentList
 from prompts.missinginfo import build_missing_info_human_prompt, build_missing_info_system_prompt
+
+
+def _assert_external_llm_consent() -> None:
+    if not external_llm_requires_consent():
+        return
+    consent = os.environ.get("CLINICAL_DATA_EXTERNAL_LLM_CONSENT", "false").strip().lower()
+    if consent != "true":
+        raise RuntimeError(
+            "CLINICAL_DATA_EXTERNAL_LLM_CONSENT=true is required before sending patient data to external LLMs."
+        )
+
 
 _PROMPT: ChatPromptTemplate = ChatPromptTemplate.from_messages(
     [
@@ -48,7 +60,23 @@ def _build_uncertain_summary(
 
 
 def _format_profile_summary(profile: dict[str, Any]) -> str:
-    available = [f"{k}: {str(v)[:60]}" for k, v in profile.items() if v and v != [] and v != ""]
+    redacted_fields = {
+        "age",
+        "sex",
+        "conditions",
+        "primary_condition",
+        "biomarkers",
+        "medications",
+        "prior_treatments",
+    }
+    available: list[str] = []
+    for key, value in profile.items():
+        if value in (None, "", []):
+            continue
+        if key in redacted_fields:
+            available.append(f"{key}: [redacted]")
+        else:
+            available.append(f"{key}: {str(value)[:60]}")
     return "\n".join(available[:20])
 
 
@@ -57,6 +85,7 @@ async def _invoke_missing_info_llm(
     uncertain_summary: str,
 ) -> CompletenessAssessmentList:
     """Invoke the missing-info chain. Timeout is delegated to RunnableConfig."""
+    _assert_external_llm_consent()
     return cast(
         "CompletenessAssessmentList",
         await _get_chain().ainvoke(
@@ -67,7 +96,7 @@ async def _invoke_missing_info_llm(
             config={
                 "run_name": "missing_info",
                 "tags": ["eligibility", "missing-data"],
-                "timeout": settings.llm_call_timeout_seconds,
+                "timeout": get_settings().llm_call_timeout_seconds,
             },
         ),
     )
@@ -118,8 +147,8 @@ _ACTIONABLE_FIELD_MAP: dict[str, tuple[str, str]] = {
         "Order serum creatinine and calculate creatinine clearance/eGFR.",
     ),
     "egfr": (
-        "Renal function labs",
-        "Order serum creatinine and calculate creatinine clearance/eGFR.",
+        "EGFR mutation status required",
+        "Confirm EGFR mutation result from pathology/molecular report.",
     ),
     "ast": (
         "Liver function labs",

@@ -1,0 +1,12 @@
+flowchart TD
+    CLI[clinical-trial-agent run] --> SUP[langgraph_app end_to_end_graph]
+    SUP --> RET[COMPILED_RETRIEVAL]
+    SUP --> ELI[COMPILED_ELIGIBILITY]
+    SUP --> SYN[COMPILED_SYNTHESIS]
+
+    RET --> CT[ClinicalTrials.gov API]
+    ELI --> LLM[DeepSeek / configured LLM]
+    SYN --> REPORT[report_json + report_text]
+
+    SUP --> MEM[(PostgreSQL memory/cache)]
+    SUP --> CHK[(LangGraph checkpointer)]

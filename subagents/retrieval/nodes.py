@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from agents import search_refiner, trial_search
-from config import settings
+from config import get_settings
 from loguru import logger
 
 from .state import RetrievalState
@@ -65,7 +65,9 @@ async def execute_searches(state: RetrievalState) -> dict[str, Any]:
     queries = state.get("current_queries", [])
 
     try:
-        fetched = await trial_search._run_search_queries(queries, settings.max_trials_per_query)
+        fetched = await trial_search._run_search_queries(
+            queries, get_settings().max_trials_per_query
+        )
         return {
             "fetched_trials": fetched,
             "executed_query_strings": [str(q) for q in queries],
@@ -106,7 +108,7 @@ async def assess_and_finalize(state: RetrievalState) -> dict[str, Any]:
 
 def should_retry_search(state: RetrievalState) -> str:
     """Route: if too few unique new results and internal retries available, try again."""
-    if settings.one_pass_mode:
+    if get_settings().one_pass_mode:
         return "finalize"
     fetched = state.get("fetched_trials") or []
     existing_ids = set(state.get("existing_nct_ids") or [])
@@ -114,7 +116,7 @@ def should_retry_search(state: RetrievalState) -> str:
     unique_new_count = len(_get_new_unique_trials(fetched, existing_ids))
     if (
         unique_new_count < 3
-        and state.get("internal_retry_count", 0) < settings.retrieval_internal_max_retries
+        and state.get("internal_retry_count", 0) < get_settings().retrieval_internal_max_retries
     ):
         return "retry_search"
     return "finalize"
