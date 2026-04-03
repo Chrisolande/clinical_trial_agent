@@ -1,4 +1,3 @@
-.env.schema
 
 .codacy/
 .vincent/
@@ -9,3 +8,4 @@ clinical_trial_agent.egg-info
 __pycache__/
 .venv/
 .langgraph_api/
+.hypothesis/

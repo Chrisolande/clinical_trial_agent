@@ -1,17 +1,18 @@
 {
-    "age": 34,
-    "sex": "female",
-    "primary_condition": "colorectal adenocarcinoma",
-    "stage": "III",
-    "medications": [
-        "fluorouracil",
-        "leucovorin",
-        "oxaliplatin"
-    ],
-    "biomarkers": [
-        "KRAS wild-type",
-        "NRAS wild-type",
-        "BRAF wild-type",
-        "MSI-High"
-    ]
+  "_notice": "SYNTHETIC DATA ONLY. This file is a test fixture. Never replace with real patient data.",
+  "age": 34,
+  "sex": "female",
+  "primary_condition": "colorectal adenocarcinoma",
+  "stage": "III",
+  "medications": [
+    "fluorouracil",
+    "leucovorin",
+    "oxaliplatin"
+  ],
+  "biomarkers": [
+    "KRAS wild-type",
+    "NRAS wild-type",
+    "BRAF wild-type",
+    "MSI-High"
+  ]
 }

@@ -4,6 +4,22 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from pydantic import BaseModel, Field
+
+
+class PatientProfile(BaseModel):
+    age: int = Field(ge=0, le=120)
+    sex: str
+    conditions: list[str] = Field(min_length=1)
+    biomarkers: list[str] = Field(default_factory=list)
+    medications: list[str] = Field(default_factory=list)
+    prior_treatments: list[str] = Field(default_factory=list)
+
+
+def validate_structured_profile(profile: dict[str, Any]) -> PatientProfile:
+    return PatientProfile.model_validate(profile)
+
+
 _CONDITION_SIGNALS = frozenset(
     {
         "cancer",

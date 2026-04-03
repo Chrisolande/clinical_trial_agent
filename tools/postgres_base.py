@@ -1,8 +1,26 @@
 from __future__ import annotations
 
+from urllib.parse import urlparse, urlunparse
+
 import asyncpg
-from config import settings
+from config import get_settings
 from loguru import logger
+
+_ALLOWED_TABLES: frozenset[str] = frozenset({"patient_runs", "llm_cache", "pipeline_audit_log"})
+_ALLOWED_COLUMNS: frozenset[str] = frozenset({"expires_at", "timestamp"})
+
+
+def redact_dsn(dsn: str) -> str:
+    parsed = urlparse(dsn)
+    if parsed.password is None:
+        return dsn
+    # netloc = parsed.netloc
+    user = parsed.username or ""
+    host = parsed.hostname or ""
+    port = f":{parsed.port}" if parsed.port else ""
+    auth = f"{user}:***@" if user else "***@"
+    redacted = parsed._replace(netloc=f"{auth}{host}{port}")
+    return urlunparse(redacted)
 
 
 class PostgresBase:
@@ -10,14 +28,24 @@ class PostgresBase:
 
     def __init__(
         self,
-        dsn: str = settings.memory_db_dsn,
+        dsn: str | None = None,
         pool_min: int = 2,
         pool_max: int = 10,
     ) -> None:
-        self._dsn = dsn
+        self._dsn = dsn or get_settings().memory_db_dsn
         self._pool_min = pool_min
         self._pool_max = pool_max
         self._pool: asyncpg.Pool | None = None
+
+    async def __aenter__(self) -> PostgresBase:
+        await self.init()
+        return self
+
+    async def __aexit__(
+        self, exc_type: type[BaseException] | None, exc: BaseException | None, tb: object | None
+    ) -> None:
+        _ = (exc_type, exc, tb)
+        await self.close()
 
     async def init(self) -> None:
         """Create connection pool and run schema setup. Call once at startup."""
@@ -53,11 +81,12 @@ class PostgresBase:
         from datetime import UTC, datetime
 
         now = datetime.now(UTC)
+        if table not in _ALLOWED_TABLES:
+            raise ValueError(f"Unsupported table for purge_expired: {table}")
+        if timestamp_col not in _ALLOWED_COLUMNS:
+            raise ValueError(f"Unsupported timestamp column for purge_expired: {timestamp_col}")
         async with self._pool_or_raise().acquire() as conn:
-            result = await conn.execute(
-                f"DELETE FROM {table} WHERE {timestamp_col} <= $1",
-                now,  # nosec B608
-            )
+            result = await conn.execute(f"DELETE FROM {table} WHERE {timestamp_col} <= $1", now)
         removed = int(result.split()[-1])
         if removed:
             logger.info(

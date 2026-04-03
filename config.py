@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import functools
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from langchain_deepseek import ChatDeepSeek
 from pydantic import SecretStr
+from tools.llm_factory import build_llm_client, is_local_provider
 
 _DEFAULT_DB_URI = "postgresql://postgres:postgres@localhost:5432/postgres"
 TIER_ORDER: dict[str, int] = {"disqualified": 0, "weak": 1, "moderate": 2, "strong": 3}
@@ -52,7 +53,8 @@ def bootstrap_environment(*, load_local_env: bool = True) -> None:
 
 @dataclass(frozen=True)
 class Settings:
-    deepseek_api_key: str
+    llm_provider: Literal["deepseek", "openai", "anthropic", "ollama"]
+    deepseek_api_key: SecretStr
     deepseek_model: str
     retry_max_attempts: int
     retry_min_wait_seconds: float
@@ -79,7 +81,7 @@ class Settings:
     retrieval_internal_max_retries: int
     max_trials_for_eligibility: int
     one_pass_mode: bool
-    tavily_api_key: str
+    tavily_api_key: SecretStr
     tavily_max_results: int
     tavily_max_trials_to_enrich: int
     tavily_enable_ctgov_supplement: bool
@@ -90,8 +92,12 @@ def load_settings() -> Settings:
     bootstrap_environment()
     database_uri = os.getenv("DATABASE_URI", _DEFAULT_DB_URI)
     memory_dsn = os.getenv("MEMORY_DB_DSN", database_uri)
+    provider = os.getenv("LLM_PROVIDER", "deepseek").strip().lower()
     return Settings(
-        deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
+        llm_provider=provider
+        if provider in {"deepseek", "openai", "anthropic", "ollama"}
+        else "deepseek",
+        deepseek_api_key=SecretStr(os.getenv("DEEPSEEK_API_KEY", "")),
         deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
         retry_max_attempts=int(os.getenv("RETRY_MAX_ATTEMPTS", "3")),
         retry_min_wait_seconds=float(os.getenv("RETRY_MIN_WAIT_SECONDS", "1.0")),
@@ -123,7 +129,7 @@ def load_settings() -> Settings:
             )
         ),
         one_pass_mode=_as_bool(os.getenv("ONE_PASS_MODE"), default=True),
-        tavily_api_key=os.getenv("TAVILY_API_KEY", ""),
+        tavily_api_key=SecretStr(os.getenv("TAVILY_API_KEY", "")),
         tavily_max_results=int(os.getenv("TAVILY_MAX_RESULTS", "3")),
         tavily_max_trials_to_enrich=int(os.getenv("TAVILY_MAX_TRIALS_TO_ENRICH", "8")),
         tavily_enable_ctgov_supplement=_as_bool(
@@ -134,16 +140,22 @@ def load_settings() -> Settings:
     )
 
 
-settings = load_settings()
+@functools.lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    return load_settings()
+
+
+class _SettingsProxy:
+    def __getattr__(self, name: str) -> Any:
+        return getattr(get_settings(), name)
+
+
+settings = _SettingsProxy()
+
+
+def external_llm_requires_consent() -> bool:
+    return not is_local_provider(get_settings().llm_provider)
 
 
 def get_llm() -> Any:
-    if not settings.deepseek_api_key:
-        raise RuntimeError("DEEPSEEK_API_KEY is required.")
-    return ChatDeepSeek(
-        model=settings.deepseek_model,
-        temperature=0.0,
-        timeout=settings.llm_call_timeout_seconds,
-        max_retries=0,
-        api_key=SecretStr(settings.deepseek_api_key),
-    )
+    return build_llm_client(get_settings())

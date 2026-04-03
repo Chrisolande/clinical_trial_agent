@@ -7,7 +7,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from config import settings
+from config import get_settings
 from diskcache import Cache
 from loguru import logger
 
@@ -16,7 +16,7 @@ from tools.postgres_base import PostgresBase
 if TYPE_CHECKING:
     import asyncpg
 
-_cache = Cache(settings.cache_dir)
+_cache = Cache(get_settings().cache_dir)
 
 _DDL = """
     CREATE TABLE IF NOT EXISTS llm_cache (
@@ -39,7 +39,11 @@ def _make_key(prefix: str, data: Any) -> str:
 
 def get_cached(prefix: str, params: Any) -> Any | None:
     key = _make_key(prefix, params)
-    return _cache.get(key)
+    try:
+        return _cache.get(key)
+    except Exception as exc:
+        logger.warning("Disk cache get failed", key=key, error=str(exc))
+        return None
 
 
 def set_cached(
@@ -49,8 +53,11 @@ def set_cached(
     ttl_seconds: int | None = None,
 ) -> None:
     key = _make_key(prefix, params)
-    ttl = ttl_seconds if ttl_seconds is not None else settings.cache_ttl_seconds
-    _cache.set(key, value, expire=ttl)
+    ttl = ttl_seconds if ttl_seconds is not None else get_settings().cache_ttl_seconds
+    try:
+        _cache.set(key, value, expire=ttl)
+    except Exception as exc:
+        logger.warning("Disk cache set failed", key=key, error=str(exc))
 
 
 class LLMCache(PostgresBase):
@@ -87,7 +94,7 @@ class LLMCache(PostgresBase):
     ) -> None:
         key = _make_key(prefix, params)
         now = datetime.now(UTC)
-        ttl = ttl_seconds if ttl_seconds is not None else settings.cache_ttl_seconds
+        ttl = ttl_seconds if ttl_seconds is not None else get_settings().cache_ttl_seconds
         expires = now + timedelta(seconds=ttl)
         async with self._pool_or_raise().acquire() as conn:
             await conn.execute(
@@ -152,3 +159,42 @@ class LLMCache(PostgresBase):
             }
             for r in rows
         }
+
+
+def _ttl_from_primary_completion_date(primary_completion_date: str | None) -> int:
+    default_ttl = get_settings().cache_ttl_seconds
+    if not primary_completion_date:
+        return default_ttl
+    raw = str(primary_completion_date).strip()
+    if not raw:
+        return default_ttl
+    try:
+        date_part = raw.split("T", 1)[0]
+        completion = datetime.fromisoformat(date_part).replace(tzinfo=UTC)
+    except ValueError:
+        return default_ttl
+    now = datetime.now(UTC)
+    if completion <= now:
+        return default_ttl
+    ttl = int((completion - now).total_seconds())
+    return max(60, ttl)
+
+
+def get_cached_eligibility_verdict(nct_id: str, profile_hash: str) -> dict[str, Any] | None:
+    result = get_cached("eligibility_verdict", {"nct_id": nct_id, "profile_hash": profile_hash})
+    return result if isinstance(result, dict) else None
+
+
+def set_cached_eligibility_verdict(
+    nct_id: str,
+    profile_hash: str,
+    verdict: dict[str, Any],
+    primary_completion_date: str | None = None,
+) -> None:
+    ttl = _ttl_from_primary_completion_date(primary_completion_date)
+    set_cached(
+        "eligibility_verdict",
+        {"nct_id": nct_id, "profile_hash": profile_hash},
+        verdict,
+        ttl_seconds=ttl,
+    )

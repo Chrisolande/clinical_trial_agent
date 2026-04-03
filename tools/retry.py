@@ -6,7 +6,7 @@ from typing import Any, ParamSpec, TypeVar, cast
 
 import httpx
 import openai
-from config import settings
+from config import get_settings
 from loguru import logger
 from tenacity import (
     RetryError,
@@ -42,17 +42,17 @@ def _ensure_tenacity_logger_bridge() -> None:
         std_logger.handlers.clear()
         std_logger.addHandler(_LoguruLoggingHandler())
         std_logger.propagate = False
-    std_logger.setLevel(getattr(logging, settings.log_level, logging.INFO))
+    std_logger.setLevel(getattr(logging, get_settings().log_level, logging.INFO))
 
 
 def _base_retry(retry_condition: Any) -> Any:
     _ensure_tenacity_logger_bridge()
     return retry(
-        stop=stop_after_attempt(settings.retry_max_attempts),
+        stop=stop_after_attempt(get_settings().retry_max_attempts),
         wait=wait_exponential_jitter(
-            initial=settings.retry_min_wait_seconds,
-            max=settings.retry_max_wait_seconds,
-            jitter=settings.retry_jitter,
+            initial=get_settings().retry_min_wait_seconds,
+            max=get_settings().retry_max_wait_seconds,
+            jitter=get_settings().retry_jitter,
         ),
         retry=retry_condition,
         before_sleep=before_sleep_log(std_logger, logging.INFO),

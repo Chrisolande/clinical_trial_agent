@@ -7,14 +7,16 @@ from functools import lru_cache
 from typing import Any, cast
 
 from clinical_trials import parse_trial_from_response, search_trials
-from config import settings
+from config import get_settings
 from langchain_tavily import TavilySearch
 from loguru import logger
+
+settings = get_settings()
 
 
 @lru_cache(maxsize=8)
 def _get_tavily_tool(api_key: str, max_results: int) -> TavilySearch:
-    """Cached TavilySearch instance keyed by active settings."""
+    """Cached TavilySearch instance keyed by active get_settings()."""
     return TavilySearch(
         api_key=api_key,
         max_results=max_results,
@@ -44,19 +46,19 @@ def _extract_eligibility_snippet(search_result: Any) -> str | None:
         if isinstance(content, str):
             cleaned = content.strip()
             if len(cleaned) >= 40:
-                return cleaned[: settings.criteria_text_max_chars]
+                return cleaned[: get_settings().criteria_text_max_chars]
     if isinstance(search_result, str):
         cleaned = search_result.strip()
         if len(cleaned) >= 40:
-            return cleaned[: settings.criteria_text_max_chars]
+            return cleaned[: get_settings().criteria_text_max_chars]
     return None
 
 
 def _run_tavily_search(query: str) -> Any:
     """Invoke Tavily synchronously - intended to be called via asyncio.to_thread."""
-    return _get_tavily_tool(settings.tavily_api_key, settings.tavily_max_results).invoke(
-        {"query": query}
-    )
+    return _get_tavily_tool(
+        get_settings().tavily_api_key.get_secret_value(), get_settings().tavily_max_results
+    ).invoke({"query": query})
 
 
 def _extract_snippet_from_response_items(response: Any) -> str | None:
@@ -74,7 +76,7 @@ def _build_supplement_candidates(
     trials: list[dict[str, Any]],
 ) -> list[tuple[int, dict[str, Any]]]:
     return [(idx, trial) for idx, trial in enumerate(trials) if _needs_ctgov_supplement(trial)][
-        : settings.tavily_max_trials_to_enrich
+        : get_settings().tavily_max_trials_to_enrich
     ]
 
 
@@ -112,7 +114,10 @@ def _apply_tavily_response(
 async def _supplement_trials_from_tavily(
     trials: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], int]:
-    if not settings.tavily_enable_ctgov_supplement or not settings.tavily_api_key:
+    if (
+        not get_settings().tavily_enable_ctgov_supplement
+        or not get_settings().tavily_api_key.get_secret_value()
+    ):
         return trials, 0
 
     candidates = _build_supplement_candidates(trials)

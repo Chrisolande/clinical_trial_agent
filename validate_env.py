@@ -3,7 +3,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-from config import bootstrap_environment, settings
+from config import bootstrap_environment, get_settings
+from tools.postgres_base import redact_dsn
 
 
 @dataclass(frozen=True)
@@ -15,10 +16,11 @@ class EnvStatus:
 
 def inspect_environment() -> EnvStatus:
     bootstrap_environment()
+    settings = get_settings()
     return EnvStatus(
-        database_uri=settings.database_uri,
-        memory_db_dsn=settings.memory_db_dsn,
-        deepseek_ready=bool(settings.deepseek_api_key),
+        database_uri=redact_dsn(settings.database_uri),
+        memory_db_dsn=redact_dsn(settings.memory_db_dsn),
+        deepseek_ready=bool(settings.deepseek_api_key.get_secret_value()),
     )
 
 
@@ -40,4 +42,4 @@ if __name__ == "__main__":
     print(f"DATABASE_URI={env_status.database_uri}")
     print(f"MEMORY_DB_DSN={env_status.memory_db_dsn}")
     print(f"DEEPSEEK_READY={env_status.deepseek_ready}")
-    print(f"CHECKPOINTER_BACKEND={os.getenv('DATABASE_URI', '')}")
+    print(f"CHECKPOINTER_BACKEND={redact_dsn(os.getenv('DATABASE_URI', ''))}")
