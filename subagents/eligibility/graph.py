@@ -15,11 +15,7 @@ from .nodes import (
     identify_missing_info,
     set_llm_semaphore,
 )
-from .state import (
-    EligibilityInput,
-    EligibilityOutput,
-    EligibilityState,
-)
+from .state import EligibilityInput, EligibilityOutput, EligibilityState
 
 bootstrap_environment()
 

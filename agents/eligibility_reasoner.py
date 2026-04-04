@@ -8,11 +8,7 @@ from loguru import logger
 from models.judge_verdict import JudgeVerdict
 from tools.retry import llm_retry
 
-from .eligibility_fallback import (
-    FALLBACK_VERDICT,
-    fallback_verdict_for_exception,
-    validate_verdict,
-)
+from .eligibility_fallback import FALLBACK_VERDICT, fallback_verdict_for_exception, validate_verdict
 from .eligibility_prompt_builder import build_judge_messages
 
 

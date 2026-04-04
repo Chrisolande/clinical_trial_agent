@@ -150,23 +150,21 @@ markers = [
 [tool.coverage.run]
 source = [
     "agents",
+    "tools",
     "models",
     "prompts",
     "subagents",
-    "tools",
-    "cli",
     "config",
     "memory",
-    "langgraph_app",
-    "constants",
-    "clinical_trials",
+    "logging_config",
+    "validate_env",
 ]
 omit = ["tests/*", "evaluation/*", "*/migrations/*"]
 branch = true
 
 [tool.coverage.report]
 show_missing = true
-fail_under = 50
+fail_under = 80
 exclude_lines = [
     "pragma: no cover",
     "if TYPE_CHECKING:",
