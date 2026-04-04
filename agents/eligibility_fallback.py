@@ -1,7 +1,5 @@
-from __future__ import annotations
-
 import re
-from typing import Any, cast
+from typing import Any
 
 import openai
 from constants import ELIGIBILITY_TIMEOUT_FALLBACK_MESSAGE
@@ -32,10 +30,10 @@ TIMEOUT_EXCEPTIONS = (
 
 def validate_verdict(verdict_dict: dict[str, Any], trial_id: str) -> JudgeVerdict:
     try:
-        return cast("JudgeVerdict", JudgeVerdict.model_validate(verdict_dict))
+        return JudgeVerdict.model_validate(verdict_dict)
     except (ValidationError, TypeError, ValueError):
         logger.warning("Invalid judge verdict schema for {}", trial_id)
-        return cast("JudgeVerdict", JudgeVerdict.model_validate(dict(FALLBACK_VERDICT)))
+        return JudgeVerdict.model_validate(dict(FALLBACK_VERDICT))
 
 
 def _make_fallback(key_concern: str, rationale: str, missing: str) -> dict[str, Any]:

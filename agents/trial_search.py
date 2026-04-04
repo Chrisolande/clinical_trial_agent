@@ -1,10 +1,8 @@
-from __future__ import annotations
-
 import asyncio
 import itertools
 from collections.abc import Sequence
 from functools import lru_cache
-from typing import Any, cast
+from typing import Any
 
 from clinical_trials import parse_trial_from_response, search_trials
 from config import get_settings
@@ -87,13 +85,11 @@ async def _run_tavily_queries(
     candidates: list[tuple[int, dict[str, Any]]],
 ) -> list[Any]:
     queries = [_build_tavily_query(trial) for _, trial in candidates]
-    return cast(
-        "list[Any]",
-        await asyncio.gather(
-            *[asyncio.to_thread(_run_tavily_search, query) for query in queries],
-            return_exceptions=True,
-        ),
+    results = await asyncio.gather(
+        *[asyncio.to_thread(_run_tavily_search, query) for query in queries],
+        return_exceptions=True,
     )
+    return list(results)
 
 
 def _apply_tavily_response(

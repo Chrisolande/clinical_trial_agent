@@ -19,6 +19,13 @@ repos:
       - id: debug-statements
       - id: detect-private-key
 
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: [--baseline, .secrets.baseline]
+        exclude: ^(uv.lock|coverage.xml)$
+
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.20.0
     hooks:
@@ -29,6 +36,13 @@ repos:
 
   - repo: local
     hooks:
+      - id: pip-audit
+        args: [--strict, --skip-editable, ".", "--ignore-vuln", "CVE-2025-69872"]
+        name: pip-audit dependency scan
+        entry: pip-audit
+        language: system
+        pass_filenames: false
+
       - id: vulture
         name: vulture dead code
         entry: vulture clinical_trial_agent/ whitelist.py --min-confidence 80

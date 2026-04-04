@@ -1,12 +1,10 @@
-from __future__ import annotations
-
 import contextlib
 import hashlib
 import inspect
 import json
 import os
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 from config import TIER_ORDER, get_settings
 from langchain.agents import create_agent
@@ -20,6 +18,12 @@ from subagents.synthesis.graph import compiled_synthesis_graph
 PatientSummary = dict[str, Any]
 TrialSummary = dict[str, Any]
 ScoredTrialSummary = dict[str, Any]
+
+
+def _require_dict(value: Any, *, source: str) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    raise TypeError(f"{source} must return dict, got {type(value)!r}")
 
 
 def _apply_feedback_adjustments(
@@ -81,13 +85,15 @@ class SupervisorRunState:
 class SupervisorOrchestrator:
     def __init__(self, checkpointer: Any | None = None) -> None:
         self._checkpointer = checkpointer
-        self._react_agent = create_agent(
-            model=self._get_llm(),
-            tools=[self.run_retrieval, self.run_eligibility, self.run_synthesis],
-            name="clinical_supervisor",
-            system_prompt="Use tools in order: run_retrieval -> run_eligibility -> run_synthesis.",
-            checkpointer=checkpointer,
-        )
+        self._react_agent = None
+        if get_settings().supervisor_use_react:
+            self._react_agent = create_agent(
+                model=self._get_llm(),
+                tools=[self.run_retrieval, self.run_eligibility, self.run_synthesis],
+                name="clinical_supervisor",
+                system_prompt="Use tools in order: run_retrieval -> run_eligibility -> run_synthesis.",
+                checkpointer=checkpointer,
+            )
 
     @staticmethod
     def _get_llm() -> Any:
@@ -113,7 +119,7 @@ class SupervisorOrchestrator:
         if thread_id:
             config = {"configurable": {"thread_id": f"{thread_id}:retrieval:{retry_count}"}}
         result = await compiled_retrieval_graph.ainvoke(retrieval_input, config=config)
-        return cast("dict[str, Any]", result)
+        return _require_dict(result, source="retrieval graph")
 
     async def run_eligibility(
         self,
@@ -143,7 +149,7 @@ class SupervisorOrchestrator:
         if thread_id:
             config = {"configurable": {"thread_id": f"{thread_id}:eligibility:{attempt}"}}
         result = await compiled_eligibility_graph.ainvoke(eligibility_input, config=config)
-        return cast("dict[str, Any]", result)
+        return _require_dict(result, source="eligibility graph")
 
     async def run_synthesis(
         self,
@@ -171,10 +177,8 @@ class SupervisorOrchestrator:
         config: RunnableConfig | None = None
         if thread_id:
             config = {"configurable": {"thread_id": f"{thread_id}:synthesis"}}
-        return cast(
-            "dict[str, Any]",
-            await compiled_synthesis_graph.ainvoke(synthesis_input, config=config),
-        )
+        result = await compiled_synthesis_graph.ainvoke(synthesis_input, config=config)
+        return _require_dict(result, source="synthesis graph")
 
     async def ainvoke(
         self,
@@ -196,33 +200,43 @@ class SupervisorOrchestrator:
 
             patient_summary = self._project_patient_summary(patient_profile)
 
-            try:
-                react_result = await self._react_agent.ainvoke(
-                    {
-                        "messages": [
-                            {
-                                "role": "user",
-                                "content": (
-                                    "Match this patient to trials by calling tools in order: "
-                                    "run_retrieval -> run_eligibility -> run_synthesis.\n"
-                                    f"Patient summary: {patient_summary}"
-                                ),
-                            }
-                        ]
-                    },
-                    config={"configurable": {"thread_id": thread_id}},
-                )
-                extracted = self._extract_final_result(react_result)
-                if isinstance(extracted.get("report_json"), dict):
-                    result = extracted
-                else:
-                    result = await self._run_tools_pipeline(
-                        patient_summary, thread_id=thread_id, memory=memory
-                    )
-            except Exception:
+            if self._react_agent is None:
                 result = await self._run_tools_pipeline(
                     patient_summary, thread_id=thread_id, memory=memory
                 )
+            else:
+                try:
+                    react_result = await self._react_agent.ainvoke(
+                        {
+                            "messages": [
+                                {
+                                    "role": "user",
+                                    "content": (
+                                        "Match this patient to trials by calling tools in order: "
+                                        "run_retrieval -> run_eligibility -> run_synthesis.\n"
+                                        f"Patient summary: {patient_summary}"
+                                    ),
+                                }
+                            ]
+                        },
+                        config={"configurable": {"thread_id": thread_id}},
+                    )
+                    extracted = self._extract_final_result(react_result)
+                    if isinstance(extracted.get("report_json"), dict):
+                        result = extracted
+                    else:
+                        result = await self._run_tools_pipeline(
+                            patient_summary, thread_id=thread_id, memory=memory
+                        )
+                except Exception as exc:
+                    logger.exception(
+                        "Supervisor react phase failed (thread_id={}, node=supervisor.react): {}",
+                        thread_id,
+                        exc,
+                    )
+                    result = await self._run_tools_pipeline(
+                        patient_summary, thread_id=thread_id, memory=memory
+                    )
 
             await memory.store(patient_profile, result)
             tier_counts = _compute_tier_counts(

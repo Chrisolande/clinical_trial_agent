@@ -1,8 +1,6 @@
-from __future__ import annotations
-
 import asyncio
 from collections import Counter
-from typing import Any, cast
+from typing import Any
 
 from config import get_llm, get_settings
 from langchain_core.prompts import ChatPromptTemplate
@@ -68,7 +66,7 @@ async def _invoke_exec_summary_llm(chain: Any, context: dict[str, Any]) -> dict[
     )
     if not isinstance(result, ExecutiveSummaryModel):
         raise ValueError(f"Unexpected report summary result type: {type(result)}")
-    return cast("dict[str, Any]", result.model_dump())
+    return result.model_dump()
 
 
 async def generate_executive_summary(

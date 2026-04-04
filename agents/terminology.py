@@ -1,8 +1,6 @@
 """Biomedical terminology normalisation node."""
 
-from __future__ import annotations
-
-from typing import Any, cast
+from typing import Any
 
 from config import get_llm
 from langchain_core.prompts import ChatPromptTemplate
@@ -57,7 +55,11 @@ async def _invoke_terminology_llm(
             "tags": ["supervisor", "terminology"],
         },
     )
-    return cast("NormalisedTerminology", result)
+    if isinstance(result, NormalisedTerminology):
+        return result
+    if isinstance(result, dict):
+        return NormalisedTerminology.model_validate(result)
+    raise TypeError(f"Unexpected terminology output type: {type(result)!r}")
 
 
 async def normalize_terminology(patient_profile: dict[str, Any]) -> dict[str, object]:
@@ -66,7 +68,7 @@ async def normalize_terminology(patient_profile: dict[str, Any]) -> dict[str, ob
         return _fallback_terminology([], [])
     try:
         result: NormalisedTerminology = await _invoke_terminology_llm(conditions, medications)
-        return cast("dict[str, object]", result.model_dump())
+        return result.model_dump()
     except Exception as exc:
         logger.error("Terminology normalisation failed after retries: {}", exc)
     return _fallback_terminology(conditions, medications)

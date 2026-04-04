@@ -1,7 +1,5 @@
-from __future__ import annotations
-
 from collections import defaultdict
-from typing import Any, cast
+from typing import Any
 
 
 def render_trial_entry(t: dict[str, Any], *, include_key_concern: bool) -> list[str]:
@@ -172,7 +170,8 @@ def build_text_report(report_json: dict[str, Any]) -> str:
 
     lines.extend(render_potential_matches(report_json))
 
-    gaps = cast("list[dict[str, Any]]", list(report_json.get("information_gaps", [])))
+    raw_gaps = report_json.get("information_gaps", [])
+    gaps = [g for g in raw_gaps if isinstance(g, dict)] if isinstance(raw_gaps, list) else []
     lines.extend(render_information_gaps(gaps))
     lines.extend(render_next_actions(gaps))
 

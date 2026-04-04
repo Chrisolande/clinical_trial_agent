@@ -1,5 +1,5 @@
 import os
-from typing import Any, cast
+from typing import Any
 
 from config import external_llm_requires_consent
 from langchain_core.messages import BaseMessage
@@ -73,10 +73,8 @@ def build_judge_messages(
 ) -> list[BaseMessage]:
     _assert_external_llm_consent()
     prompt = ChatPromptTemplate.from_template(build_eligibility_prompt())
-    return cast(
-        "list[BaseMessage]",
-        prompt.format_messages(
-            patient_summary=format_patient_summary(profile),
-            trial_summary=format_trial_summary(trial, criteria),
-        ),
+    messages = prompt.format_messages(
+        patient_summary=format_patient_summary(profile),
+        trial_summary=format_trial_summary(trial, criteria),
     )
+    return [message for message in messages if isinstance(message, BaseMessage)]

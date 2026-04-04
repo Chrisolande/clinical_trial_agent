@@ -1,7 +1,5 @@
-from __future__ import annotations
-
 import os
-from typing import Any, cast
+from typing import Any
 
 from config import external_llm_requires_consent, get_llm
 from langchain_core.prompts import ChatPromptTemplate
@@ -34,7 +32,11 @@ async def _invoke_patient_parser_llm(raw_text: str) -> ExtractedPatientProfile:
         {"clinical_text": raw_text},
         config={"run_name": "patient_parse", "tags": ["supervisor", "parse"]},
     )
-    return cast("ExtractedPatientProfile", result)
+    if isinstance(result, ExtractedPatientProfile):
+        return result
+    if isinstance(result, dict):
+        return ExtractedPatientProfile.model_validate(result)
+    raise TypeError(f"Unexpected patient parser output type: {type(result)!r}")
 
 
 async def parse_patient_profile(raw_text: str) -> dict[str, Any]:
@@ -45,10 +47,10 @@ async def parse_patient_profile(raw_text: str) -> dict[str, Any]:
     sanitized = sanitize_patient_profile(text).text
     try:
         parsed = await _invoke_patient_parser_llm(sanitized)
-        return cast("dict[str, Any]", parsed.model_dump())
+        return parsed.model_dump()
     except Exception as exc:
         logger.error("Patient parsing failed after retries: {}", exc)
         fallback_profile = ExtractedPatientProfile(
             additional_notes=f"[PARSING FAILED - SANITIZED RAW TEXT INCLUDED]\n\n{sanitized}"
         )
-        return cast("dict[str, Any]", fallback_profile.model_dump())
+        return fallback_profile.model_dump()

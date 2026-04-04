@@ -1,7 +1,5 @@
-from __future__ import annotations
-
 import json
-from typing import Any, cast
+from typing import Any
 
 from config import get_llm
 from loguru import logger
@@ -32,16 +30,16 @@ async def _judge_trial(
     if isinstance(response, JudgeVerdict):
         return response
     if isinstance(response, dict):
-        return validate_verdict(cast("dict[str, Any]", response), trial_id)
+        return validate_verdict(response, trial_id)
 
     content = getattr(response, "content", None)
     if isinstance(content, dict):
-        return validate_verdict(cast("dict[str, Any]", content), trial_id)
+        return validate_verdict(content, trial_id)
     if isinstance(content, str):
         try:
             parsed = json.loads(content)
             if isinstance(parsed, dict):
-                return validate_verdict(cast("dict[str, Any]", parsed), trial_id)
+                return validate_verdict(parsed, trial_id)
         except (json.JSONDecodeError, TypeError, ValueError):
             pass
 

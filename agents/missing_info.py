@@ -1,10 +1,8 @@
 """Missing information identification node."""
 
-from __future__ import annotations
-
 import asyncio
 import os
-from typing import Any, cast
+from typing import Any
 
 from config import external_llm_requires_consent, get_llm, get_settings
 from langchain_core.prompts import (
@@ -86,20 +84,22 @@ async def _invoke_missing_info_llm(
 ) -> CompletenessAssessmentList:
     """Invoke the missing-info chain. Timeout is delegated to RunnableConfig."""
     _assert_external_llm_consent()
-    return cast(
-        "CompletenessAssessmentList",
-        await _get_chain().ainvoke(
-            {
-                "patient_profile": _format_profile_summary(patient_profile),
-                "trial_verdicts": uncertain_summary,
-            },
-            config={
-                "run_name": "missing_info",
-                "tags": ["eligibility", "missing-data"],
-                "timeout": get_settings().llm_call_timeout_seconds,
-            },
-        ),
+    result = await _get_chain().ainvoke(
+        {
+            "patient_profile": _format_profile_summary(patient_profile),
+            "trial_verdicts": uncertain_summary,
+        },
+        config={
+            "run_name": "missing_info",
+            "tags": ["eligibility", "missing-data"],
+            "timeout": get_settings().llm_call_timeout_seconds,
+        },
     )
+    if isinstance(result, CompletenessAssessmentList):
+        return result
+    if isinstance(result, dict):
+        return CompletenessAssessmentList.model_validate(result)
+    raise TypeError(f"Unexpected missing-info output type: {type(result)!r}")
 
 
 async def identify_missing_info(
@@ -124,8 +124,8 @@ async def identify_missing_info(
         logger.warning("Missing info identification cancelled; using deterministic fallback.")
         return _fallback_missing_info_recommendations(uncertain_by_theme)
 
-    except Exception:
-        logger.exception("Missing info identification failed.")
+    except (ValueError, TypeError, RuntimeError) as exc:
+        logger.exception("Missing info identification failed: {}", exc)
         return _fallback_missing_info_recommendations(uncertain_by_theme)
 
 
