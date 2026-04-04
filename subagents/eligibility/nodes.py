@@ -1,11 +1,24 @@
+import asyncio
+import hashlib
+import json
+import os
 from typing import Any, cast
 
 from agents import criteria_parser, eligibility_reasoner, missing_info
-from config import TIER_ORDER, settings
+from config import TIER_ORDER, get_settings
 from langgraph.types import Send
 from loguru import logger
+from tools.cache import get_cached_eligibility_verdict, set_cached_eligibility_verdict
+from tools.medical_synonyms import expand_condition_tokens
 
 from .state import EligibilityState, TrialWorkerState
+
+_LLM_SEMAPHORE: asyncio.Semaphore | None = None
+
+
+def set_llm_semaphore(semaphore: asyncio.Semaphore) -> None:
+    global _LLM_SEMAPHORE
+    _LLM_SEMAPHORE = semaphore
 
 
 def _patient_profile_to_dict(patient_profile: Any) -> dict[str, Any]:
@@ -20,6 +33,12 @@ def _trial_id(trial: dict[str, Any]) -> str:
     return str(trial.get("nct_id") or trial.get("trial_id") or "unknown")
 
 
+def _profile_hash_for_cache(patient_profile: dict[str, Any]) -> str:
+    canonical = json.dumps(patient_profile, sort_keys=True, default=str)
+    salt = os.getenv("PROFILE_HASH_SALT", "")
+    return hashlib.sha256(f"{salt}::{canonical}".encode()).hexdigest()
+
+
 def _tokenize(text: str) -> set[str]:
     cleaned = "".join(ch.lower() if ch.isalnum() else " " for ch in text)
     stopwords = {"a", "of", "in", "for", "the", "and", "with", "to", "or"}
@@ -27,12 +46,12 @@ def _tokenize(text: str) -> set[str]:
 
 
 def _is_plausibly_relevant(trial: dict[str, Any], patient_condition: str) -> bool:
-    patient_tokens = _tokenize(patient_condition)
+    patient_tokens = expand_condition_tokens(_tokenize(patient_condition))
     if not patient_tokens:
         return True
     trial_conditions = " ".join(str(c) for c in trial.get("conditions", []))
     trial_title = str(trial.get("brief_title", ""))
-    combined_tokens = _tokenize(f"{trial_conditions} {trial_title}")
+    combined_tokens = expand_condition_tokens(_tokenize(f"{trial_conditions} {trial_title}"))
     return bool(patient_tokens & combined_tokens)
 
 
@@ -77,93 +96,144 @@ async def evaluate_trial_worker(state: TrialWorkerState) -> dict[str, Any]:
         patient_profile.get("primary_condition") or (patient_profile.get("conditions") or [""])[0]
     )
 
-    if patient_condition and not _is_plausibly_relevant(trial, patient_condition):
-        verdict_data = {
-            "trial_id": nct_id,
-            "match_score": 0.0,
-            "match_tier": "disqualified",
-            "major_criteria_assessable": False,
-            "critical_missing_info": [
-                "Trial appears condition-mismatched to patient primary condition."
-            ],
-            "key_concern": "Trial condition appears unrelated to patient condition",
-            "rationale": (
-                "Skipped LLM eligibility evaluation due to low condition/title token overlap "
-                "with patient primary condition."
-            ),
-            "verdicts": [],
-            "meets_count": 0,
-            "fails_count": 0,
-            "uncertain_count": 0,
-            "hard_exclusion_failures": 0,
-        }
-        return {
-            "processed_trials_with_criteria": [
-                {"trial": trial, "inclusion_criteria": [], "exclusion_criteria": []}
-            ],
-            "processed_verdicts": [verdict_data],
-        }
+    profile_hash = _profile_hash_for_cache(patient_profile)
+    cached = _cached_worker_result(trial, nct_id, profile_hash)
+    if cached is not None:
+        return cached
 
+    irrelevant = _irrelevant_worker_result(trial, nct_id, patient_condition)
+    if irrelevant is not None:
+        return irrelevant
+
+    trial_with_criteria = await _parse_trial_criteria(trial, nct_id)
+    all_criteria = _collect_all_criteria(trial_with_criteria)
+
+    if not all_criteria:
+        return _empty_criteria_worker_result(trial_with_criteria, nct_id)
+
+    verdict_data = await _evaluate_with_optional_semaphore(
+        patient_profile=patient_profile,
+        trial=trial,
+        all_criteria=all_criteria,
+    )
+    set_cached_eligibility_verdict(
+        nct_id=nct_id,
+        profile_hash=profile_hash,
+        verdict=verdict_data,
+        primary_completion_date=str(trial.get("primary_completion_date", "")),
+    )
+    return _worker_result(trial_with_criteria, verdict_data)
+
+
+def _worker_result(
+    trial_with_criteria: dict[str, Any], verdict_data: dict[str, Any]
+) -> dict[str, Any]:
+    return {
+        "processed_trials_with_criteria": [trial_with_criteria],
+        "processed_verdicts": [verdict_data],
+    }
+
+
+def _cached_worker_result(
+    trial: dict[str, Any], nct_id: str, profile_hash: str
+) -> dict[str, Any] | None:
+    cached_verdict = get_cached_eligibility_verdict(nct_id, profile_hash)
+    if cached_verdict is None:
+        return None
+    trial_stub = {"trial": trial, "inclusion_criteria": [], "exclusion_criteria": []}
+    return _worker_result(trial_stub, cached_verdict)
+
+
+def _irrelevant_worker_result(
+    trial: dict[str, Any], nct_id: str, patient_condition: str
+) -> dict[str, Any] | None:
+    if not patient_condition or _is_plausibly_relevant(trial, patient_condition):
+        return None
+    verdict_data = {
+        "trial_id": nct_id,
+        "match_score": 0.0,
+        "match_tier": "disqualified",
+        "major_criteria_assessable": False,
+        "critical_missing_info": [
+            "Trial appears condition-mismatched to patient primary condition."
+        ],
+        "key_concern": "Trial condition appears unrelated to patient condition",
+        "rationale": (
+            "Skipped LLM eligibility evaluation due to low condition/title token overlap "
+            "with patient primary condition."
+        ),
+        "verdicts": [],
+        "meets_count": 0,
+        "fails_count": 0,
+        "uncertain_count": 0,
+        "hard_exclusion_failures": 0,
+    }
+    trial_stub = {"trial": trial, "inclusion_criteria": [], "exclusion_criteria": []}
+    return _worker_result(trial_stub, verdict_data)
+
+
+async def _parse_trial_criteria(trial: dict[str, Any], nct_id: str) -> dict[str, Any]:
     try:
         parsed_trials = await criteria_parser.parse_criteria_for_trials([trial])
-        trial_with_criteria = parsed_trials[0] if parsed_trials else {"trial": trial}
+        return parsed_trials[0] if parsed_trials else {"trial": trial}
     except Exception as exc:
         logger.warning("Criteria parse failed for {}: {}", nct_id, exc)
-        trial_with_criteria = {
+        return {
             "trial": trial,
             "inclusion_criteria": [],
             "exclusion_criteria": [],
             "parse_error": str(exc),
         }
 
-    inclusion = [
+
+def _normalize_criteria(criteria: list[Any], criteria_type: str) -> list[dict[str, Any]]:
+    return [
         (
-            {**c, "criteria_type": "inclusion"}
+            {**c, "criteria_type": criteria_type}
             if isinstance(c, dict)
-            else {"text": str(c), "criteria_type": "inclusion"}
+            else {"text": str(c), "criteria_type": criteria_type}
         )
-        for c in trial_with_criteria.get("inclusion_criteria", [])
+        for c in criteria
     ]
 
-    exclusion = [
-        (
-            {**c, "criteria_type": "exclusion"}
-            if isinstance(c, dict)
-            else {"text": str(c), "criteria_type": "exclusion"}
-        )
-        for c in trial_with_criteria.get("exclusion_criteria", [])
-    ]
 
-    all_criteria = inclusion + exclusion
+def _collect_all_criteria(trial_with_criteria: dict[str, Any]) -> list[dict[str, Any]]:
+    inclusion = _normalize_criteria(trial_with_criteria.get("inclusion_criteria", []), "inclusion")
+    exclusion = _normalize_criteria(trial_with_criteria.get("exclusion_criteria", []), "exclusion")
+    return inclusion + exclusion
 
-    if not all_criteria:
-        verdict_data = {
-            "trial_id": nct_id,
-            "match_score": 0.1,
-            "match_tier": "weak",
-            "major_criteria_assessable": False,
-            "critical_missing_info": ["No parsed criteria available."],
-            "key_concern": "No assessable criteria parsed",
-            "rationale": "Eligibility criteria could not be parsed.",
-            "verdicts": [],
-            "meets_count": 0,
-            "fails_count": 0,
-            "uncertain_count": 0,
-            "hard_exclusion_failures": 0,
-        }
-        return {
-            "processed_trials_with_criteria": [trial_with_criteria],
-            "processed_verdicts": [verdict_data],
-        }
 
-    verdict_data = await eligibility_reasoner.evaluate_criteria_batch(
-        patient_profile=patient_profile, trial=trial, all_criteria=all_criteria
-    )
-
-    return {
-        "processed_trials_with_criteria": [trial_with_criteria],
-        "processed_verdicts": [verdict_data],
+def _empty_criteria_worker_result(
+    trial_with_criteria: dict[str, Any], nct_id: str
+) -> dict[str, Any]:
+    verdict_data = {
+        "trial_id": nct_id,
+        "match_score": 0.1,
+        "match_tier": "weak",
+        "major_criteria_assessable": False,
+        "critical_missing_info": ["No parsed criteria available."],
+        "key_concern": "No assessable criteria parsed",
+        "rationale": "Eligibility criteria could not be parsed.",
+        "verdicts": [],
+        "meets_count": 0,
+        "fails_count": 0,
+        "uncertain_count": 0,
+        "hard_exclusion_failures": 0,
     }
+    return _worker_result(trial_with_criteria, verdict_data)
+
+
+async def _evaluate_with_optional_semaphore(
+    *, patient_profile: dict[str, Any], trial: dict[str, Any], all_criteria: list[dict[str, Any]]
+) -> dict[str, Any]:
+    if _LLM_SEMAPHORE is None:
+        return await eligibility_reasoner.evaluate_criteria_batch(
+            patient_profile=patient_profile, trial=trial, all_criteria=all_criteria
+        )
+    async with _LLM_SEMAPHORE:
+        return await eligibility_reasoner.evaluate_criteria_batch(
+            patient_profile=patient_profile, trial=trial, all_criteria=all_criteria
+        )
 
 
 def _merge_eligibility_verdicts(
@@ -259,7 +329,7 @@ def _count_viable_trials(scored: list[dict[str, Any]]) -> int:
         1
         for trial in scored
         if TIER_ORDER.get(str(trial.get("tier", "weak")), 0)
-        >= TIER_ORDER.get(settings.min_match_tier, TIER_ORDER["moderate"])
+        >= TIER_ORDER.get(get_settings().min_match_tier, TIER_ORDER["moderate"])
     )
 
 
@@ -322,7 +392,7 @@ async def assess_viability_signal(state: EligibilityState) -> dict[str, Any]:
     )
     signal = (
         f"Viability assessment: {viable} viable trials "
-        f"(threshold=1 at tier >= {settings.min_match_tier}). "
+        f"(threshold=1 at tier >= {get_settings().min_match_tier}). "
         f"{broadening_msg}"
     )
     return {
