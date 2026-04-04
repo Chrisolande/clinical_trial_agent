@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Multi-agent clinical trial matching system"
 authors = [{ name = "Chris Olande", email = "olandechris@gmail.com" }]
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.11,<3.14"
 dependencies = [
     "langgraph>=0.2.0",
     "langchain>=0.3.0",
@@ -38,7 +38,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "ruff>=0.4.0",
+    "ruff>=0.15.8",
     "mypy>=1.10.0",
     "vulture>=2.11",
     "pytest>=8.0.0",
@@ -47,6 +47,8 @@ dev = [
     "pytest-mock>=3.14.0",
     "respx>=0.21.0",
     "hypothesis>=6.112.0",
+    "bandit>=1.7.5",
+    "uv"
 ]
 
 [project.scripts]

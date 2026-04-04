@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, TypedDict, cast
 
-from config import settings
+from config import get_settings
 from langgraph.graph import END, START, StateGraph
 from subagents.eligibility.graph import _build_eligibility_graph
 from subagents.retrieval.graph import _build_retrieval_graph
@@ -40,16 +40,9 @@ def _thread_id(state: EndToEndState, stage: str) -> str:
     return f"{base}:synthesis"
 
 
-def _compiled_retrieval() -> Any:
-    return _build_retrieval_graph().compile()
-
-
-def _compiled_eligibility() -> Any:
-    return _build_eligibility_graph().compile()
-
-
-def _compiled_synthesis() -> Any:
-    return _build_synthesis_graph().compile()
+COMPILED_RETRIEVAL = _build_retrieval_graph().compile()
+COMPILED_ELIGIBILITY = _build_eligibility_graph().compile()
+COMPILED_SYNTHESIS = _build_synthesis_graph().compile()
 
 
 async def run_retrieval_node(state: EndToEndState) -> dict[str, Any]:
@@ -60,14 +53,14 @@ async def run_retrieval_node(state: EndToEndState) -> dict[str, Any]:
         "trials_raw": [],
     }
     config = {"configurable": {"thread_id": _thread_id(state, "retrieval")}}
-    result = await _compiled_retrieval().ainvoke(retrieval_input, config=config)
+    result = await COMPILED_RETRIEVAL.ainvoke(retrieval_input, config=config)
     return {"retrieval_result": cast("dict[str, Any]", result)}
 
 
 async def run_eligibility_node(state: EndToEndState) -> dict[str, Any]:
     retrieval_result = state.get("retrieval_result") or {}
     trials_for_eligibility = list(retrieval_result.get("trials_deduplicated", []))
-    limited_trials = trials_for_eligibility[: settings.max_trials_for_eligibility]
+    limited_trials = trials_for_eligibility[: get_settings().max_trials_for_eligibility]
 
     eligibility_input = {
         "patient_profile": state.get("patient_profile") or {},
@@ -75,19 +68,19 @@ async def run_eligibility_node(state: EndToEndState) -> dict[str, Any]:
         "eligibility_verdicts": None,
     }
     config = {"configurable": {"thread_id": _thread_id(state, "eligibility")}}
-    result = await _compiled_eligibility().ainvoke(eligibility_input, config=config)
+    result = await COMPILED_ELIGIBILITY.ainvoke(eligibility_input, config=config)
     return {"eligibility_result": cast("dict[str, Any]", result)}
 
 
 def route_after_eligibility(
     state: EndToEndState,
 ) -> Literal["retry_retrieval", "run_synthesis"]:
-    if settings.one_pass_mode:
+    if get_settings().one_pass_mode:
         return "run_synthesis"
     eligibility_result = state.get("eligibility_result") or {}
     should_retry = bool(eligibility_result.get("retrieval_needs_broadening", False))
     retry_count = int(state.get("retry_count", 0))
-    if should_retry and retry_count < settings.max_retry_attempts:
+    if should_retry and retry_count < get_settings().max_retry_attempts:
         return "retry_retrieval"
     return "run_synthesis"
 
@@ -111,7 +104,7 @@ async def run_synthesis_node(state: EndToEndState) -> dict[str, Any]:
         "trials_with_criteria": eligibility_result.get("trials_with_criteria"),
     }
     config = {"configurable": {"thread_id": _thread_id(state, "synthesis")}}
-    result = await _compiled_synthesis().ainvoke(synthesis_input, config=config)
+    result = await COMPILED_SYNTHESIS.ainvoke(synthesis_input, config=config)
     casted = cast("dict[str, Any]", result)
     return {
         "synthesis_result": casted,
