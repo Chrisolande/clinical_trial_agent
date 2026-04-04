@@ -1,172 +1,137 @@
 # Clinical Trial Agent
 
-Multi-agent clinical trial matching built with LangGraph and LangChain.
+[![License](https://img.shields.io/github/license/Chrisolande/clinical_trial_agent)](LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/Chrisolande/clinical_trial_agent/ci-cd.yml?branch=main)](https://github.com/Chrisolande/clinical_trial_agent/actions)
+[![codecov](https://img.shields.io/codecov/c/github/Chrisolande/clinical_trial_agent)](https://codecov.io/gh/Chrisolande/clinical_trial_agent)
 
-It orchestrates retrieval, eligibility reasoning, and report synthesis to match a patient profile to relevant trials from ClinicalTrials.gov.
+Async multi-agent clinical trial matching built with **LangGraph**.
 
-## Overview
+The pipeline takes a patient profile, retrieves candidate studies from ClinicalTrials.gov, evaluates eligibility, and synthesizes a ranked report for clinical review.
 
-The pipeline is coordinated by a supervisor agent that calls three domain subagents:
+> [!WARNING]
+> This project is **not certified for real patient care workflows** without additional compliance, legal, and security review.
 
-- `retrieval`: finds candidate trials from ClinicalTrials.gov.
-- `eligibility`: scores each trial against patient criteria.
-- `synthesis`: ranks results and generates the final report.
+## What it does
 
-The system includes PostgreSQL-backed episodic memory and LangGraph checkpointing for durable, thread-scoped runs.
+- Retrieves trials from ClinicalTrials.gov
+- Scores trial-patient fit (`strong`, `moderate`, `weak`, `disqualified`)
+- Produces human-readable and JSON outputs
+- Persists episodic memory and cache data in PostgreSQL
 
-## Key capabilities
+## Architecture
 
-- Tool-calling supervisor orchestration with retry-aware routing.
-- Structured eligibility outcomes (`MEETS`, `FAILS`, `UNCERTAIN`) and scored trial ranking.
-- Context-engineering controls (selection, compression, isolation, and score gating).
-- Prompt-driven architecture with all prompt templates centralized in `prompts/`.
-- Async CLI powered by `async-typer` and `rich`.
+```mermaid
+flowchart TD
+    CLI[CLI / LangGraph App] --> SUP[Supervisor]
+    SUP --> RET[Retrieval Subgraph]
+    SUP --> ELI[Eligibility Subgraph]
+    SUP --> SYN[Synthesis Subgraph]
 
-## Tech stack
+    RET --> CTGOV[ClinicalTrials.gov API]
+    ELI --> LLM[LLM Provider]
+    SUP --> DB[(PostgreSQL Memory + Cache)]
+    SYN --> OUT[Report JSON + Text]
+```
 
-- Python 3.11+
-- LangGraph, LangChain, LangChain provider integrations
-- PostgreSQL (`asyncpg`) for memory/checkpoint persistence
-- `ruff`, `mypy`, `pytest`, `radon` for quality gates
+See `docs/architecture.mermaid` for the maintained source diagram.
+
+## Requirements
+
+- Python 3.13+
+- PostgreSQL 16+
+- `uv` (recommended)
 
 ## Quick start
 
 ```bash
 git clone https://github.com/Chrisolande/clinical_trial_agent.git
 cd clinical_trial_agent
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+docker compose up db
+uv sync
 ```
 
-Set environment variables (in shell or `.env`):
+Validate environment before first run:
 
 ```bash
-DEEPSEEK_API_KEY=...
+uv run python validate_env.py
+# or
+uv run clinical-trial-agent validate-env
+```
+
+## Configuration
+
+Minimum required environment variables:
+
+```bash
+DEEPSEEK_API_KEY=your-key
 DATABASE_URI=postgresql://postgres:postgres@localhost:5432/postgres
 MEMORY_DB_DSN=postgresql://postgres:postgres@localhost:5432/postgres
-LLM_CALL_TIMEOUT_SECONDS=20
-RETRIEVAL_INTERNAL_MAX_RETRIES=1
-MAX_TRIALS_FOR_ELIGIBILITY=10
+PROFILE_HASH_SALT=your-salt
+DB_ENCRYPTION_KEY=base64-32-byte-key
 ```
 
 > [!IMPORTANT]
-> `DATABASE_URI` and `MEMORY_DB_DSN` must resolve to the same database in this project setup.
-
-Validate your environment:
-
-```bash
-clinical-trial-agent validate-env
-```
+> `DATABASE_URI` and `MEMORY_DB_DSN` should point to the same database in default local setup.
 
 ## CLI usage
 
-Get help:
+```bash
+# Full pipeline
+uv run clinical-trial-agent run ./patient_profile.json
+
+# Search only
+uv run clinical-trial-agent search --condition "non-small cell lung cancer"
+
+# Memory operations
+uv run clinical-trial-agent memory list
+uv run clinical-trial-agent memory purge
+uv run clinical-trial-agent memory invalidate ./patient_profile.json
+```
+
+## Development workflow
 
 ```bash
-clinical-trial-agent --help
+make check
 ```
 
-Run full matching pipeline:
+`make check` runs linting, type-checking, tests, security checks, and complexity checks.
 
-```bash
-clinical-trial-agent run ./patient_profile.json
-```
-
-Search ClinicalTrials.gov directly:
-
-```bash
-clinical-trial-agent search --condition "non-small cell lung cancer" --intervention "pembrolizumab"
-```
-
-Manage episodic memory:
-
-```bash
-clinical-trial-agent memory list
-clinical-trial-agent memory purge
-clinical-trial-agent memory invalidate ./patient_profile.json
-```
-
-## Project layout
-
-```text
-agents/         Supervisor and domain logic
-subagents/      retrieval/, eligibility/, synthesis/ LangGraph workflows
-prompts/        Centralized prompt templates
-models/         Pydantic models and typed state schemas
-tools/          API, retry, cache, and DB helpers
-cli.py          Async Typer + Rich CLI entrypoint
-clinical_trials.py
-memory.py
-config.py
-tests/
-```
-
-## Development
-
-Run local quality checks:
-
-```bash
-ruff check .
-ruff format --check .
-mypy .
-pytest -q
-radon cc . -s -n B --exclude "tests/*"
-```
-
-> [!TIP]
-> Start with `clinical-trial-agent validate-env` before running the full pipeline.
+Current repository coverage gate is **80%+**.
 
 ## LangGraph dev server
 
-This repo includes a `langgraph.json` config with four exported graphs:
+```bash
+uv run langgraph dev --config langgraph.json --no-browser
+```
 
-- `clinical_trial_agent` (end-to-end supervisor pipeline)
+Exported graphs:
+
+- `clinical_trial_agent`
 - `retrieval`
 - `eligibility`
 - `synthesis`
 
-Start the LangGraph development server:
+## Data flow note
 
-```bash
-source .venv/bin/activate
-langgraph dev --config langgraph.json --no-browser
+If Tavily enrichment is enabled, trial NCT IDs and titles may be sent to Tavily APIs. Review retention and compliance requirements before enabling this in sensitive environments.
+
+## Contributing
+
+Contributor process, branch conventions, lockfile workflow, and local quality expectations are documented in **[CONTRIBUTING.md](CONTRIBUTING.md)**.
+
+## Security
+
+Vulnerability reporting process, consent/data-flow expectations, and clinical-data safety boundaries are documented in **[SECURITY.md](SECURITY.md)**.
+
+## Project layout
+
+```text
+agents/         Core orchestration and reasoning modules
+subagents/      retrieval/, eligibility/, synthesis/ graphs and nodes
+models/         Pydantic models
+tools/          Cache, retry, DB, validator, telemetry utilities
+prompts/        Prompt templates
+tests/          Unit + integration test suite
+cli.py          Typer CLI entrypoint
+memory.py       Episodic memory persistence
 ```
-
-Invoke the full end-to-end graph from another terminal:
-
-```bash
-curl -sS -X POST "http://127.0.0.1:2024/runs/wait" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "assistant_id": "clinical_trial_agent",
-    "input": {
-      "patient_profile": {
-        "age": 62,
-        "sex": "female",
-        "primary_condition": "non-small cell lung cancer",
-        "conditions": ["non-small cell lung cancer"]
-      },
-      "thread_id": "dev-e2e-1"
-    },
-    "config": {"configurable": {"thread_id": "dev-e2e-1"}}
-  }'
-```
-
-For subgraph-only testing, change `assistant_id` to `retrieval`, `eligibility`, or `synthesis` and provide each graph's expected input schema.
-
-### Token tracing workflow (Studio)
-
-1. Start server:
-
-```bash
-langgraph dev --config langgraph.json --port 2025
-```
-
-2. Open Studio using the printed URL for port `2025`.
-3. Select assistant **`clinical_trial_agent`** to see the full top-level node path:
-   - `run_retrieval`
-   - `run_eligibility`
-   - `retry_retrieval` (conditional)
-   - `run_synthesis`
-4. Drill into assistants `retrieval`, `eligibility`, and `synthesis` to inspect internal node-level traces and identify expensive LLM steps.
