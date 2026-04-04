@@ -57,11 +57,11 @@ def _base_retry(retry_condition: Any) -> Any:
     )
 
 
-def llm_retry[**P, R](func: Callable[P, R]) -> Callable[P, R]:  # type: ignore[valid-type]
+def llm_retry[**P, R](func: Callable[P, R]) -> Callable[P, R]:
     wrapped = _base_retry(retry_if_exception_type(_TRANSIENT_LLM_ERRORS))(func)
     return cast("Callable[P, R]", wrapped)
 
 
-def http_retry[**P, R](func: Callable[P, R]) -> Callable[P, R]:  # type: ignore[valid-type]
+def http_retry[**P, R](func: Callable[P, R]) -> Callable[P, R]:
     wrapped = _base_retry(retry_if_exception_type(_TRANSIENT_HTTP_ERRORS))(func)
     return cast("Callable[P, R]", wrapped)

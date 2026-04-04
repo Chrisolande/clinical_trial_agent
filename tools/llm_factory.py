@@ -45,7 +45,7 @@ def build_llm_client(settings: Any) -> Any:
             raise RuntimeError("ANTHROPIC_API_KEY is required when LLM_PROVIDER=anthropic")
         model = os.getenv("ANTHROPIC_MODEL", "claude-3-5-haiku-latest")
         return ChatAnthropic(
-            model_name=model, temperature=0.0, timeout=settings.llm_call_timeout_seconds
+            model_name=model, temperature=0.0, timeout=settings.llm_call_timeout_seconds, stop=None
         )
 
     if provider == "ollama":
