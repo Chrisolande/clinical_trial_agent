@@ -1,20 +1,16 @@
 """PostgreSQL-backed LLM verdict cache."""
 
-from __future__ import annotations
-
 import hashlib
 import json
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+import asyncpg
 from config import get_settings
 from diskcache import Cache
 from loguru import logger
 
 from tools.postgres_base import PostgresBase
-
-if TYPE_CHECKING:
-    import asyncpg
 
 _cache = Cache(get_settings().cache_dir)
 

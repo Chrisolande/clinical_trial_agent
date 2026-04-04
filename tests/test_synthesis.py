@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import pytest
 from subagents.synthesis import nodes
 from subagents.synthesis import nodes as synthesis_nodes

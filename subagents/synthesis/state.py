@@ -1,7 +1,5 @@
 """State schemas for the Synthesis sub-agent."""
 
-from __future__ import annotations
-
 import operator
 from typing import Annotated, Any, TypedDict
 

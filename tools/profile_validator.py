@@ -1,8 +1,6 @@
-from __future__ import annotations
-
 import re
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -17,7 +15,7 @@ class PatientProfile(BaseModel):
 
 
 def validate_structured_profile(profile: dict[str, Any]) -> PatientProfile:
-    return cast("PatientProfile", PatientProfile.model_validate(profile))
+    return PatientProfile.model_validate(profile)
 
 
 _CONDITION_SIGNALS = frozenset(

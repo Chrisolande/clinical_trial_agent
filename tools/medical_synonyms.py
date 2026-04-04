@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 CONDITION_SYNONYMS: dict[str, list[str]] = {
     "crc": ["colorectal", "colorectal cancer", "colon cancer", "rectal cancer"],
     "nsclc": ["non small cell", "non-small-cell", "non-small-cell lung cancer"],

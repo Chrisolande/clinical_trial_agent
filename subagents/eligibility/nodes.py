@@ -2,7 +2,7 @@ import asyncio
 import hashlib
 import json
 import os
-from typing import Any, cast
+from typing import Any
 
 from agents import criteria_parser, eligibility_reasoner, missing_info
 from config import TIER_ORDER, get_settings
@@ -25,7 +25,8 @@ def _patient_profile_to_dict(patient_profile: Any) -> dict[str, Any]:
     if isinstance(patient_profile, dict):
         return patient_profile
     if hasattr(patient_profile, "model_dump"):
-        return cast("dict[str, Any]", patient_profile.model_dump())
+        dumped = patient_profile.model_dump()
+        return dumped if isinstance(dumped, dict) else {}
     return {}
 
 
@@ -89,8 +90,10 @@ def dispatch_trial_workers(state: EligibilityState) -> list[Send]:
 
 
 async def evaluate_trial_worker(state: TrialWorkerState) -> dict[str, Any]:
-    trial = state["trial"]
-    patient_profile = _patient_profile_to_dict(state["patient_profile"])
+    trial = state.get("trial")
+    if not isinstance(trial, dict):
+        raise ValueError("Eligibility worker missing trial payload")
+    patient_profile = _patient_profile_to_dict(state.get("patient_profile"))
     nct_id = _trial_id(trial)
     patient_condition = str(
         patient_profile.get("primary_condition") or (patient_profile.get("conditions") or [""])[0]

@@ -75,14 +75,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v4
         with:
           python-version: '3.13'
+
       - uses: astral-sh/setup-uv@v5
+
       - name: Install dev dependencies
         run: uv pip install -e .[dev] --system
+
       - name: Run security checks
         run: make security
+
+      - name: Run pip-audit
+        run: pip-audit --strict --local --skip clinical-trial-agent
 
   build-and-push:
     name: Build Docker image and push to registry

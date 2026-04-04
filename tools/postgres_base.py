@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from urllib.parse import urlparse, urlunparse
 
 import asyncpg
@@ -43,7 +41,7 @@ class PostgresBase:
         self._pool_max = pool_max
         self._pool: asyncpg.Pool | None = None
 
-    async def __aenter__(self) -> PostgresBase:
+    async def __aenter__(self) -> "PostgresBase":
         await self.init()
         return self
 
@@ -55,6 +53,8 @@ class PostgresBase:
 
     async def init(self) -> None:
         """Create connection pool and run schema setup. Call once at startup."""
+        if self._pool is not None:
+            return
         self._pool = await asyncpg.create_pool(
             dsn=self._dsn,
             min_size=self._pool_min,
@@ -63,15 +63,17 @@ class PostgresBase:
         async with self._pool.acquire() as conn:
             await self._setup_schema(conn)
         logger.info(
-            f"{self.__class__.__name__} pool ready",
-            dsn=self._dsn,
+            "{} pool ready",
+            self.__class__.__name__,
+            dsn=redact_dsn(self._dsn),
         )
 
     async def close(self) -> None:
         """Gracefully close the connection pool."""
         if self._pool:
             await self._pool.close()
-            logger.info(f"{self.__class__.__name__} pool closed")
+            logger.info("{} pool closed", self.__class__.__name__)
+            self._pool = None
 
     def _pool_or_raise(self) -> asyncpg.Pool:
         if self._pool is None:

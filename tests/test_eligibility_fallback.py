@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from agents import eligibility_fallback
 from constants import ELIGIBILITY_TIMEOUT_FALLBACK_MESSAGE
 from models.judge_verdict import JudgeVerdict

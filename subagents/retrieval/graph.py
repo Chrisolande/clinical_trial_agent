@@ -1,7 +1,3 @@
-from __future__ import annotations
-
-from typing import cast
-
 from langgraph.graph import END, START, StateGraph
 
 from .nodes import (
@@ -33,7 +29,7 @@ def _build_retrieval_graph() -> StateGraph:
     graph.add_edge("broaden_and_retry", "execute_searches")
     graph.add_edge("assess_and_finalize", END)
 
-    return cast("StateGraph", graph)
+    return graph
 
 
 compiled_retrieval_graph = _build_retrieval_graph().compile()

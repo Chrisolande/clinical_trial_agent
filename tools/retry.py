@@ -1,6 +1,6 @@
 import logging
 from collections.abc import Callable
-from typing import Any, ParamSpec, TypeVar, cast
+from typing import Any, cast
 
 import httpx
 import openai
@@ -16,8 +16,6 @@ from tenacity import (
 )
 
 __all__ = ["RetryError", "http_retry", "llm_retry"]
-P = ParamSpec("P")
-R = TypeVar("R")
 std_logger = logging.getLogger("tenacity.retry")
 
 _TRANSIENT_LLM_ERRORS = (
@@ -52,16 +50,16 @@ def _base_retry(retry_condition: Any) -> Any:
             jitter=get_settings().retry_jitter,
         ),
         retry=retry_condition,
-        before_sleep=before_sleep_log(cast("Any", std_logger), logging.INFO),
+        before_sleep=before_sleep_log(std_logger, logging.INFO),
         reraise=True,
     )
 
 
 def llm_retry[**P, R](func: Callable[P, R]) -> Callable[P, R]:
     wrapped = _base_retry(retry_if_exception_type(_TRANSIENT_LLM_ERRORS))(func)
-    return cast("Callable[P, R]", wrapped)
+    return cast("Callable[P, R]", wrapped)  # tenacity decorator erases callable generics
 
 
 def http_retry[**P, R](func: Callable[P, R]) -> Callable[P, R]:
     wrapped = _base_retry(retry_if_exception_type(_TRANSIENT_HTTP_ERRORS))(func)
-    return cast("Callable[P, R]", wrapped)
+    return cast("Callable[P, R]", wrapped)  # tenacity decorator erases callable generics

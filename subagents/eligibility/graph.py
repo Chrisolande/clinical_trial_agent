@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import asyncio
 from typing import Any
 
@@ -58,27 +56,6 @@ def compile_eligibility_graph(*, use_postgres_checkpointer: bool = True) -> Any:
     # Disabled for now: this graph is compiled repeatedly inside the supervisor.
     # Reusing the supervisor-level checkpointer avoids duplicate setup/teardown paths.
     return graph.compile()
-
-
-if __name__ == "__main__":
-    input_data = {
-        "patient_profile": {"age": 45, "primary_condition": "Condition X"},
-        "trials_deduplicated": [
-            {
-                "nct_id": "T1",
-                "eligibility_criteria_raw": "Inclusion: age >= 18. Exclusion: pregnancy.",
-            },
-            {
-                "nct_id": "T2",
-                "eligibility_criteria_raw": "Inclusion: confirmed diagnosis of Condition X.",
-            },
-        ],
-        "eligibility_verdicts": None,
-    }
-
-    app = compile_eligibility_graph(use_postgres_checkpointer=True)
-    result = asyncio.run(app.ainvoke(input_data))
-    print(result)
 
 
 compiled_eligibility_graph = _build_eligibility_graph().compile()

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -92,7 +90,7 @@ async def test_supervisor_calls_subagents_in_sequence(
         return {"report_json": {"ok": True}, "report_text": "done"}
 
     class DummyMemory:
-        async def __aenter__(self) -> DummyMemory:
+        async def __aenter__(self) -> "DummyMemory":
             return self
 
         async def write_pipeline_audit(
@@ -134,6 +132,10 @@ async def test_supervisor_calls_subagents_in_sequence(
 
 @pytest.mark.asyncio
 async def test_supervisor_uses_single_memory_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    from config import get_settings
+
+    monkeypatch.setenv("SUPERVISOR_USE_REACT", "true")
+    get_settings.cache_clear()
     monkeypatch.setattr(SupervisorOrchestrator, "_get_llm", staticmethod(lambda: object()))
 
     class DummyReactAgent:
@@ -157,7 +159,7 @@ async def test_supervisor_uses_single_memory_context(monkeypatch: pytest.MonkeyP
             _ = (patient_profile, run_id, outcome_tier_counts, model_version, consent_flag)
             return None
 
-        async def __aenter__(self) -> DummyMemory:
+        async def __aenter__(self) -> "DummyMemory":
             await DummyMemory.aenter()
             return self
 
@@ -179,6 +181,7 @@ async def test_supervisor_uses_single_memory_context(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr("agents.supervisor.EpisodicMemory", DummyMemory)
     result = await orchestrator.ainvoke({"age": 42}, thread_id="thread-one")
+    get_settings.cache_clear()
     assert result["report_text"] == "done"
     assert DummyMemory.aenter.call_count == 1
 

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Literal
 
 from config import TIER_ORDER
@@ -20,13 +18,13 @@ class JudgeVerdict(BaseModel):
     rationale: str
 
     @model_validator(mode="after")
-    def _coerce_disqualified_score(self) -> JudgeVerdict:
+    def _coerce_disqualified_score(self) -> "JudgeVerdict":
         if self.match_tier == "disqualified" and self.match_score != 0.0:
             self.match_score = 0.0
         return self
 
     @model_validator(mode="after")
-    def _coerce_major_criteria_uncertainty(self) -> JudgeVerdict:
+    def _coerce_major_criteria_uncertainty(self) -> "JudgeVerdict":
         if not self.major_criteria_assessable and self.match_score > 0.55:
             self.match_score = 0.55
         if (
@@ -37,7 +35,7 @@ class JudgeVerdict(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def _coerce_high_uncertainty_tier(self) -> JudgeVerdict:
+    def _coerce_high_uncertainty_tier(self) -> "JudgeVerdict":
         uncertain_count = len(self.inclusion_uncertain) + len(self.exclusion_uncertain)
         total = (
             len(self.inclusion_met)

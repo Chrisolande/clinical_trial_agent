@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -12,7 +10,7 @@ from tools.llm_factory import build_llm_client, is_local_provider
 def _settings(provider: str) -> SimpleNamespace:
     return SimpleNamespace(
         llm_provider=provider,
-        deepseek_api_key=__import__("pydantic").SecretStr("k"),
+        deepseek_api_key=SecretStr("k"),
         deepseek_model="deepseek-chat",
         llm_call_timeout_seconds=5.0,
     )

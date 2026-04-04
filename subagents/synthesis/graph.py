@@ -1,7 +1,3 @@
-from __future__ import annotations
-
-from typing import Any, cast
-
 from langgraph.graph import END, START, StateGraph
 
 from .nodes import (
@@ -41,7 +37,7 @@ def _build_synthesis_graph() -> StateGraph:
     graph.add_edge("generate_report", "finalize_output")
     graph.add_edge("finalize_output", END)
 
-    return cast("StateGraph[Any]", graph)
+    return graph
 
 
 compiled_synthesis_graph = _build_synthesis_graph().compile()
