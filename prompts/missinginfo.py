@@ -1,6 +1,3 @@
-from __future__ import annotations
-
-
 def build_missing_info_system_prompt() -> str:
     return (
         "You are a clinical data completeness analyst.\n\n"

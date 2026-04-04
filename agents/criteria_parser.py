@@ -1,8 +1,6 @@
-from __future__ import annotations
-
 import asyncio
 import re
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 from config import get_llm, get_settings
 from langchain_core.prompts import ChatPromptTemplate
@@ -41,7 +39,7 @@ def _infer_category(text: str) -> CriterionCategoryLiteral:
     for category, keywords in _CATEGORY_KEYWORDS:
         if _contains_any(lowered, keywords):
             return category
-    return cast("CriterionCategoryLiteral", "other")
+    return "other"
 
 
 def _clean_lines(text: str) -> list[str]:
@@ -137,9 +135,11 @@ async def parse_eligibility_criteria(eligibility_text: str, nct_id: str) -> dict
 
         return parsed
 
-    except Exception:
+    except (ValueError, TypeError, RuntimeError) as exc:
         logger.warning(
-            "Criteria parsing failed for {}. Falling back to deterministic split.", nct_id
+            "Criteria parsing failed for {} ({}). Falling back to deterministic split.",
+            nct_id,
+            exc,
         )
         fallback = _fallback_parse_criteria(eligibility_text)
         return _assign_ids(fallback.model_dump(), nct_id)
@@ -155,7 +155,11 @@ async def _invoke_criteria_llm(chain: Any, inputs: dict[str, Any]) -> ParsedElig
     if result is None:
         raise ValueError("LLM returned None for criteria parse")
 
-    return cast("ParsedEligibilityCriterion", result)
+    if isinstance(result, ParsedEligibilityCriterion):
+        return result
+    if isinstance(result, dict):
+        return ParsedEligibilityCriterion.model_validate(result)
+    raise TypeError(f"Unexpected criteria parser output type: {type(result)!r}")
 
 
 def _assign_ids(

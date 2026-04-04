@@ -1,6 +1,3 @@
-from __future__ import annotations
-
-
 def build_criteria_parser_prompt() -> str:
     return """
 ROLE

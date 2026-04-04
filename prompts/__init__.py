@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from .criteria_parser import build_criteria_parser_prompt
 from .eligibility import build_eligibility_prompt
 from .missinginfo import build_missing_info_prompt
