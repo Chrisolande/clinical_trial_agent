@@ -53,7 +53,7 @@ async def run_retrieval_node(state: EndToEndState) -> dict[str, Any]:
         "trials_raw": [],
     }
     config = {"configurable": {"thread_id": _thread_id(state, "retrieval")}}
-    result = await COMPILED_RETRIEVAL.ainvoke(retrieval_input, config=config)
+    result = await COMPILED_RETRIEVAL.ainvoke(retrieval_input, config=cast("Any", config))
     return {"retrieval_result": cast("dict[str, Any]", result)}
 
 
@@ -68,7 +68,7 @@ async def run_eligibility_node(state: EndToEndState) -> dict[str, Any]:
         "eligibility_verdicts": None,
     }
     config = {"configurable": {"thread_id": _thread_id(state, "eligibility")}}
-    result = await COMPILED_ELIGIBILITY.ainvoke(eligibility_input, config=config)
+    result = await COMPILED_ELIGIBILITY.ainvoke(eligibility_input, config=cast("Any", config))
     return {"eligibility_result": cast("dict[str, Any]", result)}
 
 
@@ -104,7 +104,7 @@ async def run_synthesis_node(state: EndToEndState) -> dict[str, Any]:
         "trials_with_criteria": eligibility_result.get("trials_with_criteria"),
     }
     config = {"configurable": {"thread_id": _thread_id(state, "synthesis")}}
-    result = await COMPILED_SYNTHESIS.ainvoke(synthesis_input, config=config)
+    result = await COMPILED_SYNTHESIS.ainvoke(synthesis_input, config=cast("Any", config))
     casted = cast("dict[str, Any]", result)
     return {
         "synthesis_result": casted,

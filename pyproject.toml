@@ -149,7 +149,22 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["clinical_trial_agent"]
+# The project is structured with top-level modules and several package
+# directories. List them explicitly so coverage collects the code exercised
+# by tests when running in CI.
+source = [
+    "agents",
+    "models",
+    "prompts",
+    "subagents",
+    "tools",
+    "cli",
+    "config",
+    "memory",
+    "langgraph_app",
+    "constants",
+    "clinical_trials",
+]
 omit = ["tests/*", "evaluation/*", "*/migrations/*"]
 branch = true
 

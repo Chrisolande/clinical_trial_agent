@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import functools
 import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -120,7 +121,10 @@ def load_settings() -> Settings:
         ctgov_base_url=os.getenv("CTGOV_BASE_URL", "https://clinicaltrials.gov/api/v2"),
         max_trials_per_query=int(os.getenv("MAX_TRIALS_PER_QUERY", "10")),
         cache_ttl_seconds=int(os.getenv("CACHE_TTL_SECONDS", str(3600 * 24))),
-        cache_dir=os.getenv("CACHE_DIR", "/tmp/clinical_trial_cache"),
+        cache_dir=str(
+            Path(os.getenv("CACHE_DIR", ""))
+            or (Path(tempfile.gettempdir()) / "clinical_trial_cache")
+        ),
         memory_ttl_days=int(os.getenv("MEMORY_TTL_DAYS", "30")),
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
         supervisor_use_react=_as_bool(os.getenv("SUPERVISOR_USE_REACT"), default=False),

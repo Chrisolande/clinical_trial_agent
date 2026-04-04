@@ -9,6 +9,12 @@ from loguru import logger
 _ALLOWED_TABLES: frozenset[str] = frozenset({"patient_runs", "llm_cache", "pipeline_audit_log"})
 _ALLOWED_COLUMNS: frozenset[str] = frozenset({"expires_at", "timestamp"})
 
+_PURGE_QUERIES: dict[str, str] = {
+    "patient_runs": "DELETE FROM patient_runs WHERE expires_at <= $1",
+    "llm_cache": "DELETE FROM llm_cache WHERE expires_at <= $1",
+    "pipeline_audit_log": "DELETE FROM pipeline_audit_log WHERE timestamp <= $1",
+}
+
 
 def redact_dsn(dsn: str) -> str:
     parsed = urlparse(dsn)
@@ -85,8 +91,12 @@ class PostgresBase:
             raise ValueError(f"Unsupported table for purge_expired: {table}")
         if timestamp_col not in _ALLOWED_COLUMNS:
             raise ValueError(f"Unsupported timestamp column for purge_expired: {timestamp_col}")
+        # Use the prebuilt, allowlisted query template for the requested table.
+        query = _PURGE_QUERIES.get(table)
+        if not query:
+            raise ValueError(f"Unsupported table for purge_expired: {table}")
         async with self._pool_or_raise().acquire() as conn:
-            result = await conn.execute(f"DELETE FROM {table} WHERE {timestamp_col} <= $1", now)
+            result = await conn.execute(query, now)
         removed = int(result.split()[-1])
         if removed:
             logger.info(
