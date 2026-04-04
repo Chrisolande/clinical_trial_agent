@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from agents.supervisor import SupervisorOrchestrator
@@ -91,10 +92,22 @@ async def test_supervisor_calls_subagents_in_sequence(
         return {"report_json": {"ok": True}, "report_text": "done"}
 
     class DummyMemory:
-        async def init(self) -> None:
+        async def __aenter__(self) -> DummyMemory:
+            return self
+
+        async def write_pipeline_audit(
+            self,
+            patient_profile: dict[str, Any],
+            run_id: str,
+            outcome_tier_counts: dict[str, int],
+            model_version: str,
+            consent_flag: bool,
+        ) -> None:
+            _ = (patient_profile, run_id, outcome_tier_counts, model_version, consent_flag)
             return None
 
-        async def close(self) -> None:
+        async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+            _ = (exc_type, exc, tb)
             return None
 
         async def lookup(self, patient_profile: dict[str, Any]) -> dict[str, Any] | None:
@@ -105,6 +118,10 @@ async def test_supervisor_calls_subagents_in_sequence(
             _ = (patient_profile, result)
             return None
 
+        async def list_feedback(self, profile_hash: str) -> list[dict[str, Any]]:
+            _ = profile_hash
+            return []
+
     monkeypatch.setattr("agents.supervisor.EpisodicMemory", DummyMemory)
     monkeypatch.setattr(orchestrator, "run_retrieval", fake_run_retrieval)
     monkeypatch.setattr(orchestrator, "run_eligibility", fake_run_eligibility)
@@ -113,3 +130,67 @@ async def test_supervisor_calls_subagents_in_sequence(
     result = await orchestrator.ainvoke({"age": 42}, thread_id="test-thread")
     assert result.get("report_text") == "done"
     assert order == ["retrieval", "eligibility", "synthesis"]
+
+
+@pytest.mark.asyncio
+async def test_supervisor_uses_single_memory_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(SupervisorOrchestrator, "_get_llm", staticmethod(lambda: object()))
+
+    class DummyReactAgent:
+        async def ainvoke(self, *_: Any, **__: Any) -> dict[str, Any]:
+            return {"report_json": {"ok": True}, "report_text": "done"}
+
+    monkeypatch.setattr("agents.supervisor.create_agent", lambda **_: DummyReactAgent())
+    orchestrator = SupervisorOrchestrator()
+
+    class DummyMemory:
+        aenter = AsyncMock()
+
+        async def write_pipeline_audit(
+            self,
+            patient_profile: dict[str, Any],
+            run_id: str,
+            outcome_tier_counts: dict[str, int],
+            model_version: str,
+            consent_flag: bool,
+        ) -> None:
+            _ = (patient_profile, run_id, outcome_tier_counts, model_version, consent_flag)
+            return None
+
+        async def __aenter__(self) -> DummyMemory:
+            await DummyMemory.aenter()
+            return self
+
+        async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+            _ = (exc_type, exc, tb)
+            return None
+
+        async def lookup(self, patient_profile: dict[str, Any]) -> dict[str, Any] | None:
+            _ = patient_profile
+            return None
+
+        async def store(self, patient_profile: dict[str, Any], result: dict[str, Any]) -> None:
+            _ = (patient_profile, result)
+            return None
+
+        async def list_feedback(self, profile_hash: str) -> list[dict[str, Any]]:
+            _ = profile_hash
+            return []
+
+    monkeypatch.setattr("agents.supervisor.EpisodicMemory", DummyMemory)
+    result = await orchestrator.ainvoke({"age": 42}, thread_id="thread-one")
+    assert result["report_text"] == "done"
+    assert DummyMemory.aenter.call_count == 1
+
+
+def test_feedback_adjustment_changes_ranking() -> None:
+    from agents.supervisor import _apply_feedback_adjustments
+
+    scored = [
+        {"trial_id": "NCT1", "tier": "moderate", "score": 0.60, "rank": 1},
+        {"trial_id": "NCT2", "tier": "moderate", "score": 0.59, "rank": 2},
+    ]
+    feedback = [{"nct_id": "NCT2", "verdict": "confirmed"}]
+
+    adjusted = _apply_feedback_adjustments(scored, feedback)
+    assert adjusted[0]["trial_id"] == "NCT2"

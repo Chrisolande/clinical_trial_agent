@@ -73,7 +73,8 @@ include = ["agents*", "models*", "prompts*", "subagents*", "tools*"]
 [tool.ruff]
 target-version = "py313"
 line-length = 100
-src = ["clinical_trial_agent", "tests"]
+src = ["agents", "models", "prompts", "subagents", "tools", "tests"]
+extend-exclude = [".jbeval", ".vincent", ".codacy", "bin"]
 
 [tool.ruff.lint]
 select = [

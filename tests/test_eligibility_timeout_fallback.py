@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 from agents import eligibility_reasoner
+from constants import ELIGIBILITY_TIMEOUT_FALLBACK_MESSAGE
 
 
 @pytest.mark.asyncio
@@ -17,4 +18,4 @@ async def test_eligibility_timeout_returns_weak_fallback(monkeypatch: pytest.Mon
     )
     assert result["trial_id"] == "NCT05983432"
     assert result["match_tier"] == "weak"
-    assert result["key_concern"] == "Eligibility judge timeout"
+    assert result["key_concern"] == ELIGIBILITY_TIMEOUT_FALLBACK_MESSAGE

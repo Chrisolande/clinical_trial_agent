@@ -6,6 +6,7 @@ from typing import Any
 
 import cli
 import pytest
+import typer
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -125,3 +126,10 @@ def test_validate_env_command(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli, "validate_or_raise", lambda: DummyEnv())
     result = runner.invoke(cli.app, ["validate-env"])
     assert result.exit_code == 0
+
+
+def test_load_json_oversized_profile(tmp_path: Path) -> None:
+    oversized = tmp_path / "big.json"
+    oversized.write_text("x" * (1024 * 1024 + 10), encoding="utf-8")
+    with pytest.raises(typer.BadParameter):
+        cli._load_json(oversized)

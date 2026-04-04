@@ -21,6 +21,7 @@ class DummyLLM:
 
 @pytest.mark.asyncio
 async def test_malformed_judge_response_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CLINICAL_DATA_EXTERNAL_LLM_CONSENT", "true")
     monkeypatch.setattr("agents.eligibility_reasoner.get_llm", lambda: DummyLLM("no tags here"))
     result = await evaluate_criteria_batch(
         patient_profile={"age": 50},
