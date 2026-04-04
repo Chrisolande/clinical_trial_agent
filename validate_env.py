@@ -1,9 +1,9 @@
-from __future__ import annotations
-
-import os
+import asyncio
 from dataclasses import dataclass
 
+import asyncpg
 from config import bootstrap_environment, get_settings
+from loguru import logger
 from tools.postgres_base import redact_dsn
 
 
@@ -24,8 +24,18 @@ def inspect_environment() -> EnvStatus:
     )
 
 
-def validate_or_raise() -> EnvStatus:
+async def _ping_database(dsn: str) -> None:
+    conn = await asyncpg.connect(dsn=dsn, timeout=5)
+    try:
+        await conn.fetchval("SELECT 1")
+    finally:
+        await conn.close()
+
+
+async def validate_or_raise_async() -> EnvStatus:
     status = inspect_environment()
+    settings = get_settings()
+
     if status.database_uri != status.memory_db_dsn:
         raise RuntimeError(
             "DATABASE_URI and MEMORY_DB_DSN are not synchronized. "
@@ -33,13 +43,18 @@ def validate_or_raise() -> EnvStatus:
         )
     if not status.deepseek_ready:
         raise RuntimeError("DEEPSEEK_API_KEY is missing.")
+
+    await _ping_database(settings.database_uri)
     return status
+
+
+def validate_or_raise() -> EnvStatus:
+    return asyncio.run(validate_or_raise_async())
 
 
 if __name__ == "__main__":
     env_status = validate_or_raise()
-    print("Environment is valid")
-    print(f"DATABASE_URI={env_status.database_uri}")
-    print(f"MEMORY_DB_DSN={env_status.memory_db_dsn}")
-    print(f"DEEPSEEK_READY={env_status.deepseek_ready}")
-    print(f"CHECKPOINTER_BACKEND={redact_dsn(os.getenv('DATABASE_URI', ''))}")
+    logger.info("Environment is valid")
+    logger.info("DATABASE_URI={}", env_status.database_uri)
+    logger.info("MEMORY_DB_DSN={}", env_status.memory_db_dsn)
+    logger.info("DEEPSEEK_READY={}", env_status.deepseek_ready)

@@ -12,6 +12,7 @@ test:
 
 security:
 	bandit -r . -ll
+	pip-audit --strict --skip-editable . --ignore-vuln CVE-2025-69872
 
 complexity:
 	radon cc --min B .

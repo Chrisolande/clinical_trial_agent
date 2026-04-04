@@ -1,23 +1,20 @@
-from __future__ import annotations
-
 import functools
 import os
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Final, Literal
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from tools.llm_factory import build_llm_client, is_local_provider
 
-_DEFAULT_DB_URI = "postgresql://postgres:postgres@localhost:5432/postgres"
-TIER_ORDER: dict[str, int] = {"disqualified": 0, "weak": 1, "moderate": 2, "strong": 3}
-
-
-def _as_bool(value: str | None, *, default: bool = False) -> bool:
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+_DEFAULT_DB_URI: Final[str] = "postgresql://postgres:postgres@localhost:5432/postgres"
+TIER_ORDER: Final[dict[str, int]] = {
+    "disqualified": 0,
+    "weak": 1,
+    "moderate": 2,
+    "strong": 3,
+}
 
 
 def _load_local_env_file() -> None:
@@ -44,7 +41,9 @@ def bootstrap_environment(*, load_local_env: bool = True) -> None:
     database_uri = os.getenv("DATABASE_URI")
 
     if not memory_dsn and not database_uri:
-        memory_dsn = _DEFAULT_DB_URI
+        os.environ["DATABASE_URI"] = _DEFAULT_DB_URI
+        os.environ["MEMORY_DB_DSN"] = _DEFAULT_DB_URI
+        return
 
     if memory_dsn and not database_uri:
         os.environ["DATABASE_URI"] = memory_dsn
@@ -52,101 +51,81 @@ def bootstrap_environment(*, load_local_env: bool = True) -> None:
         os.environ["MEMORY_DB_DSN"] = database_uri
 
 
-@dataclass(frozen=True)
-class Settings:
-    llm_provider: Literal["deepseek", "openai", "anthropic", "ollama"]
-    deepseek_api_key: SecretStr
-    deepseek_model: str
-    retry_max_attempts: int
-    retry_min_wait_seconds: float
-    retry_max_wait_seconds: float
-    retry_jitter: float
-    min_match_tier: str
-    criteria_text_max_chars: int
-    use_cache: bool
-    database_uri: str
-    memory_db_dsn: str
-    ctgov_user_agent: str
-    ctgov_accept: str
-    ctgov_retry_attempts: int
-    ctgov_retry_backoff_base: float
-    ctgov_base_url: str
-    max_trials_per_query: int
-    cache_ttl_seconds: int
-    cache_dir: str
-    memory_ttl_days: int
-    log_level: str
-    supervisor_use_react: bool
-    supervisor_agent_timeout_seconds: float
-    llm_call_timeout_seconds: float
-    retrieval_internal_max_retries: int
-    max_trials_for_eligibility: int
-    one_pass_mode: bool
-    tavily_api_key: SecretStr
-    tavily_max_results: int
-    tavily_max_trials_to_enrich: int
-    tavily_enable_ctgov_supplement: bool
-    max_retry_attempts: int = 5
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="", case_sensitive=False, extra="ignore")
 
+    llm_provider: Literal["deepseek", "openai", "anthropic", "ollama"] = "deepseek"
+    deepseek_api_key: SecretStr = Field(default=SecretStr(""), repr=False)
+    deepseek_model: str = "deepseek-chat"
 
-def _normalize_provider(provider: str) -> Literal["deepseek", "openai", "anthropic", "ollama"]:
-    normalized = provider.strip().lower()
-    if normalized in {"deepseek", "openai", "anthropic", "ollama"}:
-        return cast('Literal["deepseek", "openai", "anthropic", "ollama"]', normalized)
-    return "deepseek"
+    retry_max_attempts: int = 3
+    retry_min_wait_seconds: float = 1.0
+    retry_max_wait_seconds: float = 30.0
+    retry_jitter: float = 0.5
+
+    min_match_tier: str = "moderate"
+    criteria_text_max_chars: int = 8000
+    use_cache: bool = True
+
+    database_uri: str = _DEFAULT_DB_URI
+    memory_db_dsn: str = _DEFAULT_DB_URI
+
+    ctgov_user_agent: str = "clinical-trial-agent"
+    ctgov_accept: str = "application/json"
+    ctgov_retry_attempts: int = 5
+    ctgov_retry_backoff_base: float = 2.0
+    ctgov_base_url: str = "https://clinicaltrials.gov/api/v2"
+
+    max_trials_per_query: int = 10
+    cache_ttl_seconds: int = 3600 * 24
+    cache_dir: str = Field(
+        default_factory=lambda: str(Path(tempfile.gettempdir()) / "clinical_trial_cache")
+    )
+    memory_ttl_days: int = 30
+
+    log_level: str = "INFO"
+    supervisor_use_react: bool = False
+    supervisor_agent_timeout_seconds: float = 45.0
+    llm_call_timeout_seconds: float = 60.0
+    retrieval_internal_max_retries: int = 0
+    max_trials_for_eligibility: int | None = None
+    one_pass_mode: bool = True
+
+    tavily_api_key: SecretStr = Field(default=SecretStr(""), repr=False)
+    tavily_max_results: int = 3
+    tavily_max_trials_to_enrich: int = 8
+    tavily_enable_ctgov_supplement: bool = True
+
+    max_retry_attempts: int = 1
+
+    @field_validator("llm_provider", mode="before")
+    @classmethod
+    def _normalize_provider(cls, value: object) -> str:
+        normalized = str(value or "deepseek").strip().lower()
+        if normalized in {"deepseek", "openai", "anthropic", "ollama"}:
+            return normalized
+        raise ValueError("LLM_PROVIDER must be one of: deepseek, openai, anthropic, ollama")
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def _normalize_log_level(cls, value: object) -> str:
+        return str(value or "INFO").upper()
+
+    @model_validator(mode="after")
+    def _validate_dsn_consistency(self) -> "Settings":
+        if self.database_uri != self.memory_db_dsn:
+            raise ValueError(
+                "DATABASE_URI and MEMORY_DB_DSN must point to the same database. "
+                f"DATABASE_URI={self.database_uri!r}, MEMORY_DB_DSN={self.memory_db_dsn!r}"
+            )
+        if self.max_trials_for_eligibility is None:
+            self.max_trials_for_eligibility = self.max_trials_per_query
+        return self
 
 
 def load_settings() -> Settings:
     bootstrap_environment()
-    database_uri = os.getenv("DATABASE_URI", _DEFAULT_DB_URI)
-    memory_dsn = os.getenv("MEMORY_DB_DSN", database_uri)
-    provider = _normalize_provider(os.getenv("LLM_PROVIDER", "deepseek"))
-    return Settings(
-        llm_provider=provider,
-        deepseek_api_key=SecretStr(os.getenv("DEEPSEEK_API_KEY", "")),
-        deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
-        retry_max_attempts=int(os.getenv("RETRY_MAX_ATTEMPTS", "3")),
-        retry_min_wait_seconds=float(os.getenv("RETRY_MIN_WAIT_SECONDS", "1.0")),
-        retry_max_wait_seconds=float(os.getenv("RETRY_MAX_WAIT_SECONDS", "30.0")),
-        retry_jitter=float(os.getenv("RETRY_JITTER", "0.5")),
-        min_match_tier=os.getenv("MIN_MATCH_TIER", "moderate"),
-        criteria_text_max_chars=int(os.getenv("CRITERIA_TEXT_MAX_CHARS", "8000")),
-        use_cache=_as_bool(os.getenv("USE_CACHE"), default=True),
-        database_uri=database_uri,
-        memory_db_dsn=memory_dsn,
-        ctgov_user_agent=os.getenv("CTGOV_USER_AGENT", "clinical-trial-agent"),
-        ctgov_accept=os.getenv("CTGOV_ACCEPT", "application/json"),
-        ctgov_retry_attempts=int(os.getenv("CTGOV_RETRY_ATTEMPTS", "5")),
-        ctgov_retry_backoff_base=float(os.getenv("CTGOV_RETRY_BACKOFF_BASE", "2.0")),
-        ctgov_base_url=os.getenv("CTGOV_BASE_URL", "https://clinicaltrials.gov/api/v2"),
-        max_trials_per_query=int(os.getenv("MAX_TRIALS_PER_QUERY", "10")),
-        cache_ttl_seconds=int(os.getenv("CACHE_TTL_SECONDS", str(3600 * 24))),
-        cache_dir=str(
-            Path(os.getenv("CACHE_DIR", ""))
-            or (Path(tempfile.gettempdir()) / "clinical_trial_cache")
-        ),
-        memory_ttl_days=int(os.getenv("MEMORY_TTL_DAYS", "30")),
-        log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
-        supervisor_use_react=_as_bool(os.getenv("SUPERVISOR_USE_REACT"), default=False),
-        supervisor_agent_timeout_seconds=float(os.getenv("SUPERVISOR_AGENT_TIMEOUT_SECONDS", "45")),
-        llm_call_timeout_seconds=float(os.getenv("LLM_CALL_TIMEOUT_SECONDS", "60")),
-        retrieval_internal_max_retries=int(os.getenv("RETRIEVAL_INTERNAL_MAX_RETRIES", "0")),
-        max_trials_for_eligibility=int(
-            os.getenv(
-                "MAX_TRIALS_FOR_ELIGIBILITY",
-                os.getenv("MAX_TRIALS_PER_QUERY", "10"),
-            )
-        ),
-        one_pass_mode=_as_bool(os.getenv("ONE_PASS_MODE"), default=True),
-        tavily_api_key=SecretStr(os.getenv("TAVILY_API_KEY", "")),
-        tavily_max_results=int(os.getenv("TAVILY_MAX_RESULTS", "3")),
-        tavily_max_trials_to_enrich=int(os.getenv("TAVILY_MAX_TRIALS_TO_ENRICH", "8")),
-        tavily_enable_ctgov_supplement=_as_bool(
-            os.getenv("TAVILY_ENABLE_CTGOV_SUPPLEMENT"),
-            default=True,
-        ),
-        max_retry_attempts=int(os.getenv("MAX_RETRY_ATTEMPTS", "1")),
-    )
+    return Settings()
 
 
 @functools.lru_cache(maxsize=1)

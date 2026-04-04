@@ -1,8 +1,7 @@
-from __future__ import annotations
-
-from typing import Any, Literal, TypedDict, cast
+from typing import Any, Literal, TypedDict
 
 from config import get_settings
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from subagents.eligibility.graph import _build_eligibility_graph
 from subagents.retrieval.graph import _build_retrieval_graph
@@ -30,6 +29,12 @@ class EndToEndOutput(TypedDict):
     report_text: str | None
 
 
+def _require_dict(value: Any, *, source: str) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    raise TypeError(f"{source} must return dict, got {type(value)!r}")
+
+
 def _thread_id(state: EndToEndState, stage: str) -> str:
     base = state.get("thread_id") or "langgraph-dev-thread"
     retry = int(state.get("retry_count", 0))
@@ -52,9 +57,9 @@ async def run_retrieval_node(state: EndToEndState) -> dict[str, Any]:
         "retry_count": int(state.get("retry_count", 0)),
         "trials_raw": [],
     }
-    config = {"configurable": {"thread_id": _thread_id(state, "retrieval")}}
-    result = await COMPILED_RETRIEVAL.ainvoke(retrieval_input, config=cast("Any", config))
-    return {"retrieval_result": cast("dict[str, Any]", result)}
+    config: RunnableConfig = {"configurable": {"thread_id": _thread_id(state, "retrieval")}}
+    result = await COMPILED_RETRIEVAL.ainvoke(retrieval_input, config=config)
+    return {"retrieval_result": _require_dict(result, source="retrieval subgraph")}
 
 
 async def run_eligibility_node(state: EndToEndState) -> dict[str, Any]:
@@ -67,9 +72,9 @@ async def run_eligibility_node(state: EndToEndState) -> dict[str, Any]:
         "trials_deduplicated": limited_trials,
         "eligibility_verdicts": None,
     }
-    config = {"configurable": {"thread_id": _thread_id(state, "eligibility")}}
-    result = await COMPILED_ELIGIBILITY.ainvoke(eligibility_input, config=cast("Any", config))
-    return {"eligibility_result": cast("dict[str, Any]", result)}
+    config: RunnableConfig = {"configurable": {"thread_id": _thread_id(state, "eligibility")}}
+    result = await COMPILED_ELIGIBILITY.ainvoke(eligibility_input, config=config)
+    return {"eligibility_result": _require_dict(result, source="eligibility subgraph")}
 
 
 def route_after_eligibility(
@@ -103,13 +108,15 @@ async def run_synthesis_node(state: EndToEndState) -> dict[str, Any]:
         "decision_history": list(eligibility_result.get("decision_history", [])),
         "trials_with_criteria": eligibility_result.get("trials_with_criteria"),
     }
-    config = {"configurable": {"thread_id": _thread_id(state, "synthesis")}}
-    result = await COMPILED_SYNTHESIS.ainvoke(synthesis_input, config=cast("Any", config))
-    casted = cast("dict[str, Any]", result)
+    config: RunnableConfig = {"configurable": {"thread_id": _thread_id(state, "synthesis")}}
+    result = _require_dict(
+        await COMPILED_SYNTHESIS.ainvoke(synthesis_input, config=config),
+        source="synthesis subgraph",
+    )
     return {
-        "synthesis_result": casted,
-        "report_json": casted.get("report_json"),
-        "report_text": casted.get("report_text"),
+        "synthesis_result": result,
+        "report_json": result.get("report_json"),
+        "report_text": result.get("report_text"),
     }
 
 

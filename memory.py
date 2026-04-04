@@ -1,7 +1,5 @@
 """PostgreSQL-backed episodic memory."""
 
-from __future__ import annotations
-
 import base64
 import hashlib
 import json
@@ -11,7 +9,7 @@ from typing import Any
 
 import asyncpg
 from config import get_settings
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from loguru import logger
 from tools.postgres_base import PostgresBase
 
@@ -87,7 +85,7 @@ def _deserialize_encrypted_json(payload: str, fernet: Fernet) -> dict[str, Any] 
     try:
         decrypted = fernet.decrypt(payload.encode("utf-8")).decode("utf-8")
         parsed = json.loads(decrypted)
-    except Exception:
+    except (InvalidToken, json.JSONDecodeError, ValueError, TypeError):
         return None
     return parsed if isinstance(parsed, dict) else None
 
@@ -296,7 +294,7 @@ class EpisodicMemory(PostgresBase):
         ]
 
     async def erase_profile(self, profile_hash: str) -> None:
-        async with self._pool_or_raise().acquire() as conn:
+        async with self._pool_or_raise().acquire() as conn, conn.transaction():
             await conn.execute("DELETE FROM patient_runs WHERE profile_hash = $1", profile_hash)
             await conn.execute(
                 "DELETE FROM pipeline_audit_log WHERE profile_hash = $1", profile_hash
