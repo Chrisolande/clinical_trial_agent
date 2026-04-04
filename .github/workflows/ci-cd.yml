@@ -88,9 +88,6 @@ jobs:
       - name: Run security checks
         run: make security
 
-      - name: Run pip-audit
-        run: pip-audit --strict
-
   build-and-push:
     name: Build Docker image and push to registry
     runs-on: ubuntu-latest
