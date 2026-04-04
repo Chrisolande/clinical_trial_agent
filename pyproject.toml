@@ -48,7 +48,8 @@ dev = [
     "respx>=0.21.0",
     "hypothesis>=6.112.0",
     "bandit>=1.7.5",
-    "uv"
+    "uv",
+    "radon>= 6.0.1"
 ]
 
 [project.scripts]
