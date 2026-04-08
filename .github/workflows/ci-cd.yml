@@ -5,29 +5,31 @@ on:
     branches:
       - main
       - master
-      - 'releases/**'
+      - "releases/**"
+    tags:
+      - "v*"
   pull_request:
     branches:
       - main
       - master
   schedule:
-    # Weekly integration run
-    - cron: '0 6 * * 1'
+    # Weekly Monday 06:00 UTC
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   lint:
     name: Lint & Complexity
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
-          python-version: '3.13'
-      - uses: astral-sh/setup-uv@v5
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
       - name: Install dev dependencies
         run: uv pip install -e .[dev] --system
       - name: Run lint targets
@@ -49,22 +51,31 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd="pg_isready -U postgres" --health-interval=5s --health-timeout=5s --health-retries=5
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=5
     env:
-      DATABASE_URI: postgresql://postgres:postgres@localhost:5432/postgres
+      DATABASE_URI: postgresql://postgres:postgres@localhost:5432/postgres # pragma: allowlist secret
+      MEMORY_DB_DSN: postgresql://postgres:postgres@localhost:5432/postgres # pragma: allowlist secret
       DEEPSEEK_API_KEY: dummy-key-for-testing
+      PROFILE_HASH_SALT: ci-test-salt
+      DB_ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY= # pragma: allowlist secret # pragma: allowlist secret
+      TENANT_ID: ci-tenant
+      FACILITY_ID: ci-facility
+      CLINICAL_DATA_EXTERNAL_LLM_CONSENT: "false"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
-          python-version: '3.13'
-      - uses: astral-sh/setup-uv@v5
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
       - name: Install dependencies
         run: uv pip install -e .[dev] --system
       - name: Run tests with coverage
         run: pytest --cov --cov-report=xml
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
         with:
           files: ./coverage.xml
         env:
@@ -74,40 +85,42 @@ jobs:
     name: Security checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
-          python-version: '3.13'
-
-      - uses: astral-sh/setup-uv@v5
-
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
       - name: Install dev dependencies
         run: uv pip install -e .[dev] --system
-
       - name: Run security checks
         run: make security
 
   build-and-push:
-    name: Build Docker image and push to registry
+    name: Build Docker image and push (main/tags)
     runs-on: ubuntu-latest
     needs: [lint, test, security]
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: docker-publish-${{ github.ref }}
+      cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Set image name
         id: image
-        run: echo "name=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+        run: echo "name=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
       - name: Build and push
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@0a97817b6ade9f46837855d676c4cca3a2471fc9 # v4
         with:
           context: .
           push: true
@@ -115,8 +128,47 @@ jobs:
           tags: |
             ${{ steps.image.outputs.name }}:latest
             ${{ steps.image.outputs.name }}:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=ci-push
+          cache-to: type=gha,mode=max,scope=ci-push
+
+  build-and-push-weekly:
+    name: Build Docker image and push (weekly)
+    runs-on: ubuntu-latest
+    needs: [lint, test, security]
+    if: github.event_name == 'schedule'
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: docker-weekly-publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set image name
+        id: image
+        run: echo "name=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+      - name: Set weekly tag
+        id: weekly
+        run: echo "tag=weekly-$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+      - name: Build and push weekly image
+        uses: docker/build-push-action@0a97817b6ade9f46837855d676c4cca3a2471fc9 # v4
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ steps.image.outputs.name }}:weekly
+            ${{ steps.image.outputs.name }}:${{ steps.weekly.outputs.tag }}
+          cache-from: type=gha,scope=weekly-push
+          cache-to: type=gha,mode=max,scope=weekly-push
 
   integration-weekly:
     name: Weekly integration tests
@@ -132,16 +184,25 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd="pg_isready -U postgres" --health-interval=5s --health-timeout=5s --health-retries=5
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=5
     env:
       DATABASE_URI: postgresql://postgres:postgres@localhost:5432/postgres
+      MEMORY_DB_DSN: postgresql://postgres:postgres@localhost:5432/postgres
       DEEPSEEK_API_KEY: dummy-key-for-testing
+      PROFILE_HASH_SALT: ci-test-salt
+      DB_ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY= # pragma: allowlist secret
+      TENANT_ID: ci-tenant
+      FACILITY_ID: ci-facility
+      CLINICAL_DATA_EXTERNAL_LLM_CONSENT: "false"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
-          python-version: '3.13'
-      - uses: astral-sh/setup-uv@v5
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
       - name: Install dependencies
         run: uv pip install -e .[dev] --system
       - name: Run integration tests

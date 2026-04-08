@@ -34,6 +34,9 @@ dependencies = [
     "langchain-tavily>=0.2.17",
     "openai>=1.45.0",
     "cryptography>=43.0.0",
+    "spacy>=3.7.5",
+    "scispacy>=0.5.5",
+    "nltk>=3.9.1",
 ]
 
 [project.optional-dependencies]
@@ -53,28 +56,19 @@ dev = [
 ]
 
 [project.scripts]
-clinical-trial-agent = "cli:app"
+clinical-trial-agent = "clinical_trial_agent.cli:app"
 
 [tool.setuptools]
-py-modules = [
-    "cli",
-    "clinical_trials",
-    "constants",
-    "config",
-    "logging_config",
-    "langgraph_app",
-    "memory",
-    "validate_env",
-]
+include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["agents*", "models*", "prompts*", "subagents*", "tools*"]
+include = ["clinical_trial_agent*", "agents*", "models*", "prompts*", "subagents*", "tools*"]
 
 [tool.ruff]
 target-version = "py313"
 line-length = 100
-src = ["agents", "models", "prompts", "subagents", "tools", "tests"]
+src = ["clinical_trial_agent", "agents", "models", "prompts", "subagents", "tools", "tests"]
 extend-exclude = [".jbeval", ".vincent", ".codacy", "bin"]
 
 [tool.ruff.lint]
@@ -108,7 +102,7 @@ unfixable = []
 known-first-party = ["clinical_trial_agent"]
 
 [tool.ruff.lint.per-file-ignores]
-"cli.py" = ["TC003"]
+"clinical_trial_agent/cli.py" = ["TC003"]
 "clinical_trial_agent/state.py" = ["TC003"]
 "clinical_trial_agent/subagents/eligibility/state.py" = ["TC003"]
 "clinical_trial_agent/subagents/retrieval/state.py" = ["TC003"]
@@ -158,6 +152,7 @@ testpaths = [
     "tests/test_clinical_trials.py",
     "tests/test_llm_factory.py",
     "tests/test_config.py",
+    "tests/test_medical_synonyms.py",
 ]
 addopts = "--tb=short --strict-markers -q"
 markers = [
@@ -167,12 +162,11 @@ markers = [
 
 [tool.coverage.run]
 source = [
+    "clinical_trial_agent",
     "agents",
     "subagents",
     "models",
     "tools",
-    "memory",
-    "config",
 ]
 omit = ["tests/*", "evaluation/*", "*/migrations/*"]
 branch = true

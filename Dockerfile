@@ -1,8 +1,8 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1.7
 FROM python:3.13-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1 \
+  PYTHONUNBUFFERED=1
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
@@ -20,13 +20,20 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+# NOTE: Pin this image to a digest for stricter supply-chain immutability.
+COPY --from=ghcr.io/astral-sh/uv:0.8.5 /uv /uvx /bin/
 
-COPY pyproject.toml uv.lock* /app/
+COPY pyproject.toml uv.lock* README.md /app/
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+  uv export --frozen --no-dev --format requirements-txt --output-file /app/requirements.txt \
+  && uv pip install --system --no-cache -r /app/requirements.txt \
+  && rm -f /app/requirements.txt
 
 COPY . /app
 
-RUN uv pip install --system --no-cache .
+RUN --mount=type=cache,target=/root/.cache/uv \
+  uv pip install --system --no-cache --no-deps .
 
 RUN useradd --create-home appuser \
   && chown -R appuser:appuser /app
