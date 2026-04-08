@@ -51,7 +51,6 @@ dev = [
     "respx>=0.21.0",
     "bandit>=1.7.5",
     "detect-secrets>=1.5.0",
-    "uv",
     "radon>= 6.0.1"
 ]
 
@@ -179,10 +178,4 @@ exclude_lines = [
     "if TYPE_CHECKING:",
     "raise NotImplementedError",
     "if __name__ == .__main__.:",
-]
-
-[dependency-groups]
-dev = [
-    "pytest>=9.0.2",
-    "pytest-asyncio>=1.3.0",
 ]

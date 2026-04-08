@@ -10,7 +10,10 @@
     "db"
   ],
   "shutdownAction": "stopCompose",
-  "postCreateCommand": "python -m pip install --disable-pip-version-check --no-input uv && uv sync --dev",
+  "features": {
+    "ghcr.io/devcontainers/features/uv:1": {}
+  },
+  "postCreateCommand": "uv sync --dev --frozen",
   "forwardPorts": [
     5432
   ],

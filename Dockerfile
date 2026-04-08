@@ -13,15 +13,12 @@ RUN apt-get update \
      libssl-dev \
      curl \
      git \
-     ca-certificates \
-     rustc \
-     cargo \
+     ca-certificates
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# NOTE: Pin this image to a digest for stricter supply-chain immutability.
-COPY --from=ghcr.io/astral-sh/uv:0.8.5 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.8.5@sha256:9ac8566d708f42bae522b050004f75ebc7c344bc726d6d4e70f1d308b18c4471 /uv /uvx /bin/
 
 COPY pyproject.toml uv.lock* README.md /app/
 
