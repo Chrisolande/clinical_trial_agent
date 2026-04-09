@@ -21,10 +21,10 @@ from tools.errors import ClinicalTrialsClientError
 
 from clinical_trial_agent.config import get_settings
 
-_CTGOV_HEADERS: dict[str, str] = {
-    "User-Agent": get_settings().ctgov_user_agent,
-    "Accept": get_settings().ctgov_accept,
-}
+
+def _ctgov_headers() -> dict[str, str]:
+    settings = get_settings()
+    return {"User-Agent": settings.ctgov_user_agent, "Accept": settings.ctgov_accept}
 
 
 class ToolError(BaseModel):
@@ -54,7 +54,7 @@ class FetchTrialDetailOutput(BaseModel):
 def _urllib_get_json(url: str, params: dict[str, Any], timeout: float = 30.0) -> dict[str, Any]:
     query = urlencode(params, doseq=True)
     full_url = f"{url}?{query}" if query else url
-    req = Request(full_url, headers=_CTGOV_HEADERS)
+    req = Request(full_url, headers=_ctgov_headers())
     with urlopen(req, timeout=timeout) as response:  # nosec B310
         payload = response.read()
     parsed = httpx.Response(200, content=payload).json()
@@ -85,8 +85,10 @@ async def _request_with_transport(
         return await client.post(proxy_url, json=payload, timeout=request_timeout)
 
     if has_phi and not proxy_url:
-        # Keep PHI out of URL query parameters when no tokenizing proxy is configured.
-        return await client.post(url, json=params, timeout=request_timeout)
+        raise ClinicalTrialsClientError(
+            "PHI-bearing ClinicalTrials.gov retrieval requires CTGOV_PROXY_URL to be configured",
+            retryable=False,
+        )
 
     if settings.ctgov_transport_mode == "post":
         return await client.post(url, json=params, timeout=request_timeout)
@@ -99,7 +101,7 @@ async def _request_json_with_retry(url: str, params: dict[str, Any]) -> dict[str
     timeout = httpx.Timeout(30.0)
     backoff = max(1.0, settings.ctgov_retry_backoff_base)
 
-    async with httpx.AsyncClient(timeout=timeout, headers=_CTGOV_HEADERS) as client:
+    async with httpx.AsyncClient(timeout=timeout, headers=_ctgov_headers()) as client:
         for attempt in range(retries):
             try:
                 response = await _request_with_transport(client, url, params, timeout)

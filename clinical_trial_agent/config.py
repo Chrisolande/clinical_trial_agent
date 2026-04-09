@@ -3,6 +3,7 @@ import os
 import tempfile
 from pathlib import Path
 from typing import Any, Final, Literal
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from pydantic import Field, SecretStr, field_validator, model_validator
@@ -77,7 +78,7 @@ class Settings(BaseSettings):
     ctgov_retry_attempts: int = 5
     ctgov_retry_backoff_base: float = 2.0
     ctgov_base_url: str = "https://clinicaltrials.gov/api/v2"
-    ctgov_transport_mode: Literal["get", "post"] = "post"
+    ctgov_transport_mode: Literal["get", "post"] = "get"
     ctgov_proxy_url: str | None = None
 
     max_trials_per_query: int = 10
@@ -117,6 +118,16 @@ class Settings(BaseSettings):
     @classmethod
     def _normalize_log_level(cls, value: object) -> str:
         return str(value or "INFO").upper()
+
+    @field_validator("ctgov_proxy_url")
+    @classmethod
+    def _validate_ctgov_proxy_url(cls, value: str | None) -> str | None:
+        if not value:
+            return None
+        parsed = urlparse(value)
+        if parsed.scheme != "https" or not parsed.netloc:
+            raise ValueError("CTGOV_PROXY_URL must be a valid https URL")
+        return value
 
     @model_validator(mode="after")
     def _validate_dsn_consistency(self) -> "Settings":
@@ -169,6 +180,7 @@ def require_external_llm_consent(*, node_name: str | None = None) -> None:
 
 
 def get_llm(*, contains_phi: bool = True, node_name: str | None = None) -> Any:
+    """Return an LLM client, enforcing explicit consent for PHI-bearing calls by default."""
     if contains_phi:
         require_external_llm_consent(node_name=node_name)
     return build_llm_client(get_settings())

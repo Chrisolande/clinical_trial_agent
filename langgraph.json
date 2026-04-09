@@ -4,10 +4,10 @@
     "."
   ],
   "graphs": {
-    "clinical_trial_agent": "./langgraph_app.py:end_to_end_graph",
-    "retrieval": "./langgraph_app.py:COMPILED_RETRIEVAL",
-    "eligibility": "./langgraph_app.py:COMPILED_ELIGIBILITY",
-    "synthesis": "./langgraph_app.py:COMPILED_SYNTHESIS"
+    "clinical_trial_agent": "./clinical_trial_agent/langgraph_app.py:end_to_end_graph",
+    "retrieval": "./clinical_trial_agent/langgraph_app.py:COMPILED_RETRIEVAL",
+    "eligibility": "./clinical_trial_agent/langgraph_app.py:COMPILED_ELIGIBILITY",
+    "synthesis": "./clinical_trial_agent/langgraph_app.py:COMPILED_SYNTHESIS"
   },
   "env": ".env"
 }
