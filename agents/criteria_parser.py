@@ -2,13 +2,14 @@ import asyncio
 import re
 from typing import Any, Literal
 
-from config import get_llm, get_settings
 from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
 from models.criteria import EligibilityCriterion, ParsedEligibilityCriterion
 from prompts.criteria_parser import build_criteria_parser_prompt
 from tools import cache
 from tools.retry import llm_retry
+
+from config import get_llm, get_settings
 
 CriterionCategoryLiteral = Literal[
     "age", "lab", "biomarker", "diagnosis", "medication", "performance", "other"

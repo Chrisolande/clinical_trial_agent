@@ -1,8 +1,9 @@
 from typing import Any, Literal
 
 from agents import qa_checker, report_generator
-from config import TIER_ORDER
 from loguru import logger
+
+from config import TIER_ORDER
 
 from .state import SynthesisState
 

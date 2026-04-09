@@ -4,7 +4,6 @@ from typing import Any, cast
 
 import httpx
 import openai
-from config import get_settings
 from loguru import logger
 from tenacity import (
     RetryError,
@@ -14,6 +13,8 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential_jitter,
 )
+
+from config import get_settings
 
 __all__ = ["RetryError", "http_retry", "llm_retry"]
 std_logger = logging.getLogger("tenacity.retry")

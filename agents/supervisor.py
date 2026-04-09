@@ -6,14 +6,15 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
-from config import TIER_ORDER, get_settings
 from langchain.agents import create_agent
 from langchain_core.runnables import RunnableConfig
 from loguru import logger
-from memory import EpisodicMemory, get_checkpointer
 from subagents.eligibility.graph import compiled_eligibility_graph
 from subagents.retrieval.graph import compiled_retrieval_graph
 from subagents.synthesis.graph import compiled_synthesis_graph
+
+from config import TIER_ORDER, get_settings
+from memory import EpisodicMemory, get_checkpointer
 
 PatientSummary = dict[str, Any]
 TrialSummary = dict[str, Any]

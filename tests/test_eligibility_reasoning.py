@@ -3,8 +3,9 @@ from typing import Any
 import pytest
 from agents import eligibility_reasoner
 from agents.eligibility_reasoner import evaluate_criteria_batch
-from constants import ELIGIBILITY_TIMEOUT_FALLBACK_MESSAGE
 from subagents.eligibility.nodes import _is_plausibly_relevant
+
+from constants import ELIGIBILITY_TIMEOUT_FALLBACK_MESSAGE
 
 
 class DummyResp:

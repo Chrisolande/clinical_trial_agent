@@ -1,8 +1,9 @@
 from typing import Any
 
 from agents import search_refiner, trial_search
-from config import get_settings
 from loguru import logger
+
+from config import get_settings
 
 from .state import RetrievalState
 

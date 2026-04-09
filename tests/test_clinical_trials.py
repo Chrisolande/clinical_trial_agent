@@ -1,6 +1,7 @@
-import clinical_trials
 import pytest
 from tools.errors import ClinicalTrialsClientError
+
+import clinical_trials
 
 
 @pytest.mark.asyncio

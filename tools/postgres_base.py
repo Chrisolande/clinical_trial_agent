@@ -1,8 +1,9 @@
 from urllib.parse import urlparse, urlunparse
 
 import asyncpg
-from config import get_settings
 from loguru import logger
+
+from config import get_settings
 
 _ALLOWED_TABLES: frozenset[str] = frozenset({"patient_runs", "llm_cache", "pipeline_audit_log"})
 _ALLOWED_COLUMNS: frozenset[str] = frozenset({"expires_at", "timestamp"})

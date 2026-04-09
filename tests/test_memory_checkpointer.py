@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from cryptography.fernet import Fernet
+
 from memory import EpisodicMemory, _patient_hash, get_checkpointer
 
 

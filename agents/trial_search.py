@@ -4,10 +4,11 @@ from collections.abc import Sequence
 from functools import lru_cache
 from typing import Any
 
-from clinical_trials import parse_trial_from_response, search_trials
-from config import get_settings
 from langchain_tavily import TavilySearch
 from loguru import logger
+
+from clinical_trials import parse_trial_from_response, search_trials
+from config import get_settings
 
 settings = get_settings()
 

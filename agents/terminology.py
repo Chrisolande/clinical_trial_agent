@@ -2,12 +2,13 @@
 
 from typing import Any
 
-from config import get_llm
 from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
 from models.terminology import NormalisedTerminology
 from prompts.terminology import build_terminology_prompt
 from tools.retry import llm_retry
+
+from config import get_llm
 
 _chain = ChatPromptTemplate.from_template(
     build_terminology_prompt()

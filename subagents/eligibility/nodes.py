@@ -5,11 +5,12 @@ import os
 from typing import Any
 
 from agents import criteria_parser, eligibility_reasoner, missing_info
-from config import TIER_ORDER, get_settings
 from langgraph.types import Send
 from loguru import logger
 from tools.cache import get_cached_eligibility_verdict, set_cached_eligibility_verdict
 from tools.medical_synonyms import expand_condition_tokens
+
+from config import TIER_ORDER, get_settings
 
 from .state import EligibilityState, TrialWorkerState
 

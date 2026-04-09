@@ -1,6 +1,7 @@
 from agents import eligibility_fallback
-from constants import ELIGIBILITY_TIMEOUT_FALLBACK_MESSAGE
 from models.judge_verdict import JudgeVerdict
+
+from constants import ELIGIBILITY_TIMEOUT_FALLBACK_MESSAGE
 
 
 def test_validate_verdict_falls_back_on_invalid_schema() -> None:

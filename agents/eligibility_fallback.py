@@ -2,10 +2,11 @@ import re
 from typing import Any
 
 import openai
-from constants import ELIGIBILITY_TIMEOUT_FALLBACK_MESSAGE
 from loguru import logger
 from models.judge_verdict import JudgeVerdict
 from pydantic import ValidationError
+
+from constants import ELIGIBILITY_TIMEOUT_FALLBACK_MESSAGE
 
 FALLBACK_VERDICT: dict[str, Any] = {
     "match_tier": "weak",

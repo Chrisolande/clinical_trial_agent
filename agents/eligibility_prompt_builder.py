@@ -1,11 +1,12 @@
 import os
 from typing import Any
 
-from config import external_llm_requires_consent
 from langchain_core.messages import BaseMessage
 from langchain_core.prompts import ChatPromptTemplate
 from prompts.eligibility import build_eligibility_prompt
 from tools.sanitizer import sanitize_patient_profile
+
+from config import external_llm_requires_consent
 
 
 def _has_consent() -> bool:

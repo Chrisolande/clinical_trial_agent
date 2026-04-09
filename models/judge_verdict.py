@@ -1,7 +1,8 @@
 from typing import Literal
 
-from config import TIER_ORDER
 from pydantic import BaseModel, Field, model_validator
+
+from config import TIER_ORDER
 
 
 class JudgeVerdict(BaseModel):

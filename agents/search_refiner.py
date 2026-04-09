@@ -1,7 +1,8 @@
 from typing import Any
 
-from config import get_settings
 from loguru import logger
+
+from config import get_settings
 
 
 def refine_search_strategy(

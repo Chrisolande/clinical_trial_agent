@@ -2,12 +2,13 @@ import asyncio
 from collections import Counter
 from typing import Any
 
-from config import get_llm, get_settings
 from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
 from prompts.synthesis import build_synthesis_prompt
 from pydantic import BaseModel, Field
 from tools.retry import llm_retry
+
+from config import get_llm, get_settings
 
 
 class ExecutiveSummaryModel(BaseModel):
