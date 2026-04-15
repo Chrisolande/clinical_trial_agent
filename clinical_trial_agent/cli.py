@@ -1,94 +1,51 @@
 import json
 from pathlib import Path
-from typing import Any, Literal
-from urllib.parse import urlparse
+from typing import Literal
 
 import httpx
 import typer
-from agents.patient_parser import parse_patient_profile
-from agents.supervisor import compile_supervisor_graph
 from async_typer import AsyncTyper
-from clinical_trials import search_trials
-from config import get_settings
-from logging_config import configure_logging
-from memory import EpisodicMemory
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
+from tools.cli_support import (
+    load_json as _load_json,
+)
+from tools.cli_support import (
+    load_text_profile as _load_text_profile,
+)
+from tools.cli_support import (
+    parse_profile_text as _parse_profile_text,
+)
+from tools.cli_support import (
+    run_pipeline as _run_pipeline,
+)
+from tools.cli_support import (
+    validate_webhook_url as _validate_webhook_url,
+)
+from tools.cli_support import (
+    with_memory as _with_memory,
+)
 from tools.errors import ClinicalTrialAgentError
-from validate_env import validate_or_raise_async
+
+from clinical_trial_agent.clinical_trials import search_trials
+from clinical_trial_agent.config import get_settings
+from clinical_trial_agent.logging_config import configure_logging
+from clinical_trial_agent.validate_env import validate_or_raise_async
 
 app = AsyncTyper(help="Clinical Trial Agent CLI")
 memory_app = AsyncTyper(help="Episodic memory operations")
 app.add_typer(memory_app, name="memory")
 console = Console()
-MAX_PROFILE_BYTES = 1024 * 1024
 
-
-def _load_json(path: Path) -> dict[str, Any]:
-    size_bytes = path.stat().st_size
-    if size_bytes > MAX_PROFILE_BYTES:
-        raise typer.BadParameter(f"Profile JSON exceeds 1 MB limit: {size_bytes} bytes")
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        raise RuntimeError(f"Failed to load JSON from {path}: {exc}") from exc
-    if not isinstance(payload, dict):
-        raise RuntimeError(f"Expected JSON object in {path}")
-    return payload
-
-
-async def _with_memory() -> EpisodicMemory:
-    memory = EpisodicMemory()
-    await memory.init()
-    return memory
-
-
-def _validate_webhook_url(url: str) -> None:
-    parsed = urlparse(url)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise typer.BadParameter("--webhook-url must be a valid http(s) URL")
-
-
-def _load_text_profile(path: Path) -> str:
-    size_bytes = path.stat().st_size
-    if size_bytes > MAX_PROFILE_BYTES:
-        raise typer.BadParameter(f"Profile text exceeds 1 MB limit: {size_bytes} bytes")
-    return path.read_text(encoding="utf-8")
-
-
-async def _run_pipeline(
-    patient_profile: dict[str, Any], thread_id: str, *, stream: bool
-) -> dict[str, Any]:
-    async with compile_supervisor_graph() as supervisor:
-        if (
-            stream
-            and hasattr(supervisor, "_react_agent")
-            and hasattr(supervisor._react_agent, "astream_events")
-        ):
-            async for evt in supervisor._react_agent.astream_events(
-                {
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": (
-                                "Match this patient to trials by calling tools in order: "
-                                "run_retrieval -> run_eligibility -> run_synthesis."
-                            ),
-                        }
-                    ]
-                },
-                config={"configurable": {"thread_id": thread_id}},
-                version="v1",
-            ):
-                event_name = str(evt.get("event", ""))
-                if event_name:
-                    console.print(f"[cyan]event:[/cyan] {event_name}")
-        result = await supervisor.ainvoke(patient_profile, thread_id=thread_id, recursion_limit=25)
-        if not isinstance(result, dict):
-            raise RuntimeError(f"Supervisor returned unexpected type: {type(result)!r}")
-        return result
+HANDLED_EXCEPTIONS = (
+    ClinicalTrialAgentError,
+    RuntimeError,
+    ValueError,
+    typer.BadParameter,
+    httpx.HTTPError,
+)
 
 
 @app.async_command("run", help="Run full supervisor pipeline for a patient profile input file.")
@@ -109,13 +66,12 @@ async def run(
     configure_logging(log_format=log_format)
     try:
         if input_format == "text":
-            raw_text = _load_text_profile(profile_path)
-            patient_profile = await parse_patient_profile(raw_text)
+            patient_profile = await _parse_profile_text(_load_text_profile(profile_path))
         else:
             patient_profile = _load_json(profile_path)
 
         thread_id = profile_path.stem
-        result = await _run_pipeline(patient_profile, thread_id, stream=stream)
+        result = await _run_pipeline(patient_profile, thread_id, stream=stream, console=console)
 
         if webhook_url:
             _validate_webhook_url(webhook_url)
@@ -138,13 +94,7 @@ async def run(
         else:
             report_text = result.get("report_text") or json.dumps(result, indent=2, default=str)
             console.print(Panel(report_text, title="Clinical Trial Match Report"))
-    except (
-        ClinicalTrialAgentError,
-        RuntimeError,
-        ValueError,
-        typer.BadParameter,
-        httpx.HTTPError,
-    ) as exc:
+    except HANDLED_EXCEPTIONS as exc:
         console.print(f"[red]{exc}[/red]")
         raise SystemExit(1) from exc
 
@@ -162,6 +112,14 @@ async def search(
                 condition=condition, intervention=intervention, page_size=page_size
             )
         studies = result.get("studies", [])
+        error = result.get("error")
+        if isinstance(error, dict):
+            status = error.get("status_code")
+            status_text = f" (status={status})" if status is not None else ""
+            message = str(error.get("message", "unknown error"))
+            console.print(
+                f"[yellow]ClinicalTrials.gov search error{status_text}: {message}[/yellow]"
+            )
         table = Table(title="ClinicalTrials.gov Search Results")
         table.add_column("NCT ID")
         table.add_column("Brief Title")
@@ -173,13 +131,7 @@ async def search(
                 str(study.get("overall_status", "")),
             )
         console.print(table)
-    except (
-        ClinicalTrialAgentError,
-        RuntimeError,
-        ValueError,
-        typer.BadParameter,
-        httpx.HTTPError,
-    ) as exc:
+    except HANDLED_EXCEPTIONS as exc:
         console.print(f"[red]{exc}[/red]")
         raise SystemExit(1) from exc
 
@@ -200,13 +152,7 @@ async def memory_list() -> None:
         for row in rows:
             table.add_row(row["profile_hash"], row["created_at"], row["expires_at"])
         console.print(table)
-    except (
-        ClinicalTrialAgentError,
-        RuntimeError,
-        ValueError,
-        typer.BadParameter,
-        httpx.HTTPError,
-    ) as exc:
+    except HANDLED_EXCEPTIONS as exc:
         console.print(f"[red]{exc}[/red]")
         raise SystemExit(1) from exc
     finally:
@@ -223,13 +169,7 @@ async def memory_purge() -> None:
             progress.add_task("Purging expired memory entries...", total=None)
             purged = await memory.purge_expired()
         console.print(f"Purged entries: {purged}")
-    except (
-        ClinicalTrialAgentError,
-        RuntimeError,
-        ValueError,
-        typer.BadParameter,
-        httpx.HTTPError,
-    ) as exc:
+    except HANDLED_EXCEPTIONS as exc:
         console.print(f"[red]{exc}[/red]")
         raise SystemExit(1) from exc
     finally:
@@ -249,13 +189,7 @@ async def memory_invalidate(profile_path: Path) -> None:
             progress.add_task("Invalidating cached profile...", total=None)
             removed = await memory.invalidate(patient_profile)
         console.print(f"Invalidated: {removed}")
-    except (
-        ClinicalTrialAgentError,
-        RuntimeError,
-        ValueError,
-        typer.BadParameter,
-        httpx.HTTPError,
-    ) as exc:
+    except HANDLED_EXCEPTIONS as exc:
         console.print(f"[red]{exc}[/red]")
         raise SystemExit(1) from exc
     finally:
@@ -290,13 +224,7 @@ async def validate_env() -> None:
             "TAVILY_MAX_TRIALS_TO_ENRICH", str(get_settings().tavily_max_trials_to_enrich)
         )
         console.print(table)
-    except (
-        ClinicalTrialAgentError,
-        RuntimeError,
-        ValueError,
-        typer.BadParameter,
-        httpx.HTTPError,
-    ) as exc:
+    except HANDLED_EXCEPTIONS as exc:
         console.print(f"[red]{exc}[/red]")
         raise SystemExit(1) from exc
 
@@ -307,13 +235,7 @@ async def erase_profile(hash: str = typer.Option(..., "--hash")) -> None:
     try:
         await memory.erase_profile(hash)
         console.print(f"Erased records for profile hash: {hash}")
-    except (
-        ClinicalTrialAgentError,
-        RuntimeError,
-        ValueError,
-        typer.BadParameter,
-        httpx.HTTPError,
-    ) as exc:
+    except HANDLED_EXCEPTIONS as exc:
         console.print(f"[red]{exc}[/red]")
         raise SystemExit(1) from exc
     finally:
@@ -336,13 +258,7 @@ async def feedback(
         patient_profile = _load_json(profile_path)
         await memory.save_feedback(patient_profile, run_id, nct_id, verdict, note)
         console.print("Feedback saved")
-    except (
-        ClinicalTrialAgentError,
-        RuntimeError,
-        ValueError,
-        typer.BadParameter,
-        httpx.HTTPError,
-    ) as exc:
+    except HANDLED_EXCEPTIONS as exc:
         console.print(f"[red]{exc}[/red]")
         raise SystemExit(1) from exc
     finally:

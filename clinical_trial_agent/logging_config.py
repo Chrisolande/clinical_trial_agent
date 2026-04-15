@@ -4,9 +4,10 @@ import json
 import sys
 from typing import Any
 
-from config import get_settings
 from loguru import logger
 from tools.telemetry import configure_tracing
+
+from clinical_trial_agent.config import get_settings
 
 
 def _json_sink(message: Any) -> None:

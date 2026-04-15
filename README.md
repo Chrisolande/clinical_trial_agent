@@ -40,6 +40,8 @@ See `docs/architecture.mermaid` for the maintained source diagram.
 - Python 3.13+
 - PostgreSQL 16+
 - `uv` (recommended)
+- `scispacy` + `spacy` (installed via project dependencies)
+- `nltk` stopwords corpus (`python -m nltk.downloader stopwords`)
 
 ## Quick start
 
@@ -53,7 +55,7 @@ uv sync
 Validate environment before first run:
 
 ```bash
-uv run python validate_env.py
+uv run python -m clinical_trial_agent.validate_env
 # or
 uv run clinical-trial-agent validate-env
 ```
@@ -68,10 +70,25 @@ DATABASE_URI=postgresql://postgres:postgres@localhost:5432/postgres
 MEMORY_DB_DSN=postgresql://postgres:postgres@localhost:5432/postgres
 PROFILE_HASH_SALT=your-salt
 DB_ENCRYPTION_KEY=base64-32-byte-key
+TENANT_ID=your-tenant
+FACILITY_ID=your-facility
+CLINICAL_DATA_EXTERNAL_LLM_CONSENT=false
+CTGOV_TRANSPORT_MODE=post
+# Optional: route PHI-bearing retrieval via internal proxy/tokenized path
+CTGOV_PROXY_URL=https://your-internal-proxy/ctgov/search
 ```
 
 > [!IMPORTANT]
 > `DATABASE_URI` and `MEMORY_DB_DSN` should point to the same database in default local setup.
+
+## Security & operational controls
+
+- **PHI-safe retrieval transport**: when condition/intervention terms are present, ClinicalTrials.gov requests are forced to POST JSON (no patient-derived URL query params). Use `CTGOV_PROXY_URL` for internal proxy/tokenized routing.
+- **External LLM consent gate**: `config.get_llm()` enforces `CLINICAL_DATA_EXTERNAL_LLM_CONSENT=true` for external providers (`deepseek`, `openai`, `anthropic`) on PHI-bearing calls; this is fail-closed.
+- **QA fail-closed**: QA emits structured issues (`code`, `severity`, `message`) and blocks report generation on critical findings.
+- **Deterministic medication safety**: known contraindications and malformed medication inputs disqualify affected trials.
+- **Tenant/facility governance**: memory/audit/feedback access fails closed unless `TENANT_ID` and `FACILITY_ID` are explicitly configured (non-default, non-empty).
+
 
 ## CLI usage
 
@@ -88,6 +105,12 @@ uv run clinical-trial-agent memory purge
 uv run clinical-trial-agent memory invalidate ./patient_profile.json
 ```
 
+## Terminology parsing and filtering
+
+- Condition term expansion uses **scispaCy/spaCy** when a scientific model is available (`SCISPACY_MODEL`, default tries `en_core_sci_sm`, then `en_core_sci_md`).
+- Token filtering uses **NLTK English stopwords** (no hardcoded stopword list).
+- If scispaCy model or NLTK corpus is unavailable, the pipeline falls back to deterministic legacy expansion and continues safely.
+
 ## Development workflow
 
 ```bash
@@ -97,6 +120,24 @@ make check
 `make check` runs linting, type-checking, tests, security checks, and complexity checks.
 
 Current repository coverage gate is **80%+**.
+
+## Dev container / Codespaces
+
+This repository includes a ready-to-use dev container:
+
+- `.devcontainer/devcontainer.json`
+- `.devcontainer/docker-compose.yml`
+
+It starts an app container plus PostgreSQL and runs `uv sync --dev` on create, so local VS Code Dev Containers and GitHub Codespaces use the same test/lint environment.
+
+## Docker CI weekly push
+
+`/.github/workflows/ci-cd.yml` includes a dedicated scheduled Docker publish job (`build-and-push-weekly`) that pushes:
+
+- `ghcr.io/<owner>/<repo>:weekly`
+- `ghcr.io/<owner>/<repo>:weekly-YYYYMMDD`
+
+This is separate from normal `main`/tag publish runs and uses pinned GitHub Actions SHAs plus Buildx cache scopes for more reliable weekly publishing.
 
 ## LangGraph dev server
 
@@ -132,6 +173,6 @@ models/         Pydantic models
 tools/          Cache, retry, DB, validator, telemetry utilities
 prompts/        Prompt templates
 tests/          Unit + integration test suite
-cli.py          Typer CLI entrypoint
-memory.py       Episodic memory persistence
+clinical_trial_agent/cli.py          Typer CLI entrypoint
+clinical_trial_agent/memory.py       Episodic memory persistence
 ```

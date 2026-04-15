@@ -2,9 +2,10 @@ import asyncio
 from dataclasses import dataclass
 
 import asyncpg
-from config import bootstrap_environment, get_settings
 from loguru import logger
 from tools.postgres_base import redact_dsn
+
+from clinical_trial_agent.config import bootstrap_environment, get_settings
 
 
 @dataclass(frozen=True)

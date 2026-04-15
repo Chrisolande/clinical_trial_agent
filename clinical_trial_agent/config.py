@@ -4,10 +4,12 @@ import tempfile
 from pathlib import Path
 from typing import Any, Final, Literal
 
+from dotenv import load_dotenv
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from tools.llm_factory import build_llm_client, is_local_provider
 
+_ = load_dotenv()
 _DEFAULT_DB_URI: Final[str] = "postgresql://postgres:postgres@localhost:5432/postgres"
 TIER_ORDER: Final[dict[str, int]] = {
     "disqualified": 0,
@@ -75,6 +77,8 @@ class Settings(BaseSettings):
     ctgov_retry_attempts: int = 5
     ctgov_retry_backoff_base: float = 2.0
     ctgov_base_url: str = "https://clinicaltrials.gov/api/v2"
+    ctgov_transport_mode: Literal["get", "post"] = "post"
+    ctgov_proxy_url: str | None = None
 
     max_trials_per_query: int = 10
     cache_ttl_seconds: int = 3600 * 24
@@ -82,6 +86,9 @@ class Settings(BaseSettings):
         default_factory=lambda: str(Path(tempfile.gettempdir()) / "clinical_trial_cache")
     )
     memory_ttl_days: int = 30
+
+    tenant_id: str = "default-tenant"
+    facility_id: str = "default-facility"
 
     log_level: str = "INFO"
     supervisor_use_react: bool = False
@@ -145,5 +152,23 @@ def external_llm_requires_consent() -> bool:
     return not is_local_provider(get_settings().llm_provider)
 
 
-def get_llm() -> Any:
+def has_external_llm_consent() -> bool:
+    return os.environ.get("CLINICAL_DATA_EXTERNAL_LLM_CONSENT", "false").strip().lower() == "true"
+
+
+def require_external_llm_consent(*, node_name: str | None = None) -> None:
+    if not external_llm_requires_consent():
+        return
+    if has_external_llm_consent():
+        return
+    context = f" for {node_name}" if node_name else ""
+    raise RuntimeError(
+        "CLINICAL_DATA_EXTERNAL_LLM_CONSENT=true is required before sending patient data "
+        f"to external LLMs{context}."
+    )
+
+
+def get_llm(*, contains_phi: bool = True, node_name: str | None = None) -> Any:
+    if contains_phi:
+        require_external_llm_consent(node_name=node_name)
     return build_llm_client(get_settings())

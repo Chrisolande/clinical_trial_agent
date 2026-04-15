@@ -1,11 +1,12 @@
 from typing import Any, Literal, TypedDict
 
-from config import get_settings
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from subagents.eligibility.graph import _build_eligibility_graph
 from subagents.retrieval.graph import _build_retrieval_graph
 from subagents.synthesis.graph import _build_synthesis_graph
+
+from clinical_trial_agent.config import get_settings
 
 
 class EndToEndInput(TypedDict):

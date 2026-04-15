@@ -6,10 +6,20 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 import httpx
-from config import get_settings
 from loguru import logger
 from pydantic import BaseModel, Field
+from tools.ctgov_parsing import (
+    extract_single_study as _extract_single_study,
+)
+from tools.ctgov_parsing import (
+    extract_studies as _extract_studies,
+)
+from tools.ctgov_parsing import (
+    parse_trial_from_response,
+)
 from tools.errors import ClinicalTrialsClientError
+
+from clinical_trial_agent.config import get_settings
 
 _CTGOV_HEADERS: dict[str, str] = {
     "User-Agent": get_settings().ctgov_user_agent,
@@ -56,6 +66,33 @@ def _studies_endpoint_url(base_url: str) -> str:
     return normalized if normalized.endswith("/studies") else f"{normalized}/studies"
 
 
+def _contains_phi_params(params: dict[str, Any]) -> bool:
+    return bool(params.get("query.cond") or params.get("query.intr"))
+
+
+async def _request_with_transport(
+    client: httpx.AsyncClient,
+    url: str,
+    params: dict[str, Any],
+    request_timeout: httpx.Timeout,
+) -> httpx.Response:
+    settings = get_settings()
+    has_phi = _contains_phi_params(params)
+    proxy_url = settings.ctgov_proxy_url
+
+    if has_phi and proxy_url:
+        payload = {"endpoint": url, "params": params}
+        return await client.post(proxy_url, json=payload, timeout=request_timeout)
+
+    if has_phi and not proxy_url:
+        # Keep PHI out of URL query parameters when no tokenizing proxy is configured.
+        return await client.post(url, json=params, timeout=request_timeout)
+
+    if settings.ctgov_transport_mode == "post":
+        return await client.post(url, json=params, timeout=request_timeout)
+    return await client.get(url, params=params, timeout=request_timeout)
+
+
 async def _request_json_with_retry(url: str, params: dict[str, Any]) -> dict[str, Any]:
     settings = get_settings()
     retries = max(1, settings.ctgov_retry_attempts)
@@ -65,7 +102,7 @@ async def _request_json_with_retry(url: str, params: dict[str, Any]) -> dict[str
     async with httpx.AsyncClient(timeout=timeout, headers=_CTGOV_HEADERS) as client:
         for attempt in range(retries):
             try:
-                response = await client.get(url, params=params, timeout=timeout)
+                response = await _request_with_transport(client, url, params, timeout)
             except httpx.RequestError as exc:
                 logger.warning("CT.gov request error on attempt {}: {}", attempt + 1, exc)
                 if attempt < retries - 1:
@@ -89,12 +126,16 @@ async def _request_json_with_retry(url: str, params: dict[str, Any]) -> dict[str
                 )
 
             if status == 403:
-                try:
-                    fallback_payload = await asyncio.to_thread(_urllib_get_json, url, params, 30.0)
-                    if isinstance(fallback_payload, dict):
-                        return fallback_payload
-                except Exception as exc:
-                    logger.warning("CT.gov urllib fallback failed after 403: {}", exc)
+                allow_urllib_fallback = not _contains_phi_params(params)
+                if allow_urllib_fallback:
+                    try:
+                        fallback_payload = await asyncio.to_thread(
+                            _urllib_get_json, url, params, 30.0
+                        )
+                        if isinstance(fallback_payload, dict):
+                            return fallback_payload
+                    except Exception as exc:
+                        logger.warning("CT.gov urllib fallback failed after 403: {}", exc)
                 raise ClinicalTrialsClientError(
                     "ClinicalTrials.gov request rejected (status=403)",
                     status_code=403,
@@ -130,115 +171,6 @@ async def _request_json_with_retry(url: str, params: dict[str, Any]) -> dict[str
     )
 
 
-def _get(obj: dict[str, Any], *keys: str) -> Any:
-    current: Any = obj
-    for key in keys:
-        if not isinstance(current, dict):
-            return None
-        current = current.get(key)
-    return current
-
-
-def _split_eligibility_criteria(raw: str) -> tuple[str, str]:
-    """Split CT.gov eligibilityCriteria blob into inclusion and exclusion text."""
-    if not raw:
-        return "", ""
-    if "Exclusion Criteria:" in raw:
-        inclusion_part, exclusion_part = raw.split("Exclusion Criteria:", 1)
-        return (
-            inclusion_part.replace("Inclusion Criteria:", "").strip(),
-            exclusion_part.strip(),
-        )
-    return raw.replace("Inclusion Criteria:", "").strip(), ""
-
-
-def parse_trial_from_response(study: dict[str, Any]) -> dict[str, Any]:
-    """Extract a flat trial dict from a ClinicalTrials.gov v2 study object."""
-    proto = study.get("protocolSection", {})
-
-    def sec(name: str) -> dict[str, Any]:
-        section = proto.get(name, {})
-        return section if isinstance(section, dict) else {}
-
-    id_mod = sec("identificationModule")
-    status_mod = sec("statusModule")
-    elig_mod = sec("eligibilityModule")
-    design_mod = sec("designModule")
-    outcomes_mod = sec("outcomesModule")
-    contacts_mod = sec("contactsLocationsModule")
-    arms_mod = sec("armsInterventionsModule")
-
-    phases = design_mod.get("phases", [])
-
-    locations = [
-        {
-            "facility": loc.get("facility"),
-            "city": loc.get("city"),
-            "state": loc.get("state"),
-            "country": loc.get("country"),
-            "status": loc.get("status"),
-        }
-        for loc in contacts_mod.get("locations", [])
-    ]
-
-    primary_outcomes = [
-        {
-            "measure": o.get("measure", ""),
-            "time_frame": o.get("timeFrame"),
-            "description": o.get("description"),
-        }
-        for o in outcomes_mod.get("primaryOutcomes", [])
-    ]
-
-    interventions = [name for arm in arms_mod.get("interventions", []) if (name := arm.get("name"))]
-
-    completion_date_obj = status_mod.get("primaryCompletionDateStruct", {})
-    completion_date = (
-        completion_date_obj.get("date") if isinstance(completion_date_obj, dict) else None
-    )
-
-    raw_criteria = elig_mod.get("eligibilityCriteria")
-    inclusion_text, exclusion_text = _split_eligibility_criteria(str(raw_criteria or ""))
-
-    parsed = {
-        "nct_id": id_mod.get("nctId", ""),
-        "brief_title": id_mod.get("briefTitle", ""),
-        "official_title": id_mod.get("officialTitle"),
-        "overall_status": status_mod.get("overallStatus", ""),
-        "phase": ", ".join(phases) if phases else None,
-        "lead_sponsor": _get(sec("sponsorCollaboratorsModule"), "leadSponsor", "name"),
-        "eligibility_criteria_raw": raw_criteria,
-        "locations": locations,
-        "primary_outcomes": primary_outcomes,
-        "primary_completion_date": completion_date,
-        "minimum_age": elig_mod.get("minimumAge"),
-        "maximum_age": elig_mod.get("maximumAge"),
-        "sex_eligibility": elig_mod.get("sex"),
-        "healthy_volunteers": elig_mod.get("healthyVolunteers"),
-        "brief_summary": _get(sec("descriptionModule"), "briefSummary"),
-        "conditions": sec("conditionsModule").get("conditions", []),
-        "interventions": interventions,
-    }
-    if isinstance(raw_criteria, str) and raw_criteria.strip():
-        parsed["inclusion_criteria_parsed"] = inclusion_text
-        parsed["exclusion_criteria_parsed"] = exclusion_text
-    return parsed
-
-
-def _extract_studies(data: dict[str, Any]) -> list[dict[str, Any]]:
-    studies = data.get("studies", [])
-    if isinstance(studies, list):
-        return [s for s in studies if isinstance(s, dict)]
-    return []
-
-
-def _extract_single_study(data: dict[str, Any]) -> dict[str, Any]:
-    if "protocolSection" in data and isinstance(data.get("protocolSection"), dict):
-        return data
-    studies = _extract_studies(data)
-    return studies[0] if studies else {}
-
-
 async def search_trials(
     condition: str | None = None,
     intervention: str | None = None,
@@ -262,10 +194,10 @@ async def search_trials(
 
     try:
         data = await _request_json_with_retry(
-            _studies_endpoint_url(get_settings().ctgov_base_url), params
+            _studies_endpoint_url(get_settings().ctgov_base_url),
+            params,
         )
-        studies_raw = _extract_studies(data)
-        studies = [parse_trial_from_response(study) for study in studies_raw]
+        studies = [parse_trial_from_response(s) for s in _extract_studies(data)]
         return SearchTrialsOutput(studies=studies).model_dump()
     except ClinicalTrialsClientError as exc:
         return SearchTrialsOutput(
