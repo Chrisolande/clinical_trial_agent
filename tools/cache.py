@@ -129,7 +129,8 @@ class LLMCache(PostgresBase):
         return removed
 
     async def purge_expired(self) -> int:
-        return await self._purge_expired("llm_cache")
+        removed = await self._purge_expired("llm_cache")
+        return int(removed)
 
     async def stats(self) -> dict[str, Any]:
         now = datetime.now(UTC)
@@ -158,7 +159,7 @@ class LLMCache(PostgresBase):
 
 
 def _ttl_from_primary_completion_date(primary_completion_date: str | None) -> int:
-    default_ttl = get_settings().cache_ttl_seconds
+    default_ttl = int(get_settings().cache_ttl_seconds)
     if not primary_completion_date:
         return default_ttl
     raw = str(primary_completion_date).strip()

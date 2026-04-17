@@ -28,7 +28,8 @@ DDL = """
         ON patient_runs (expires_at);
 
     CREATE TABLE IF NOT EXISTS llm_cache (
-        cache_key    TEXT PRIMARY KEY,
+         cache_key    TEXT PRIMARY KEY,
+        prefix       TEXT NOT NULL,
         value_json   JSONB NOT NULL,
         created_at   TIMESTAMPTZ NOT NULL,
         expires_at   TIMESTAMPTZ NOT NULL
@@ -36,6 +37,8 @@ DDL = """
 
     CREATE INDEX IF NOT EXISTS idx_llm_cache_expires_at
         ON llm_cache (expires_at);
+    CREATE INDEX IF NOT EXISTS idx_llm_cache_prefix
+        ON llm_cache (prefix);
 
     CREATE TABLE IF NOT EXISTS pipeline_audit_log (
         id SERIAL PRIMARY KEY,
@@ -62,7 +65,7 @@ DDL = """
     );
 """
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 def get_profile_hash_salt() -> str:

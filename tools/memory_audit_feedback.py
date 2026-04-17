@@ -1,6 +1,5 @@
 """Audit and feedback methods for episodic memory."""
 
-import json
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
@@ -27,6 +26,30 @@ class _MemoryScopeProtocol(Protocol):
     def _pool_or_raise(self) -> Any: ...
 
 
+def _scoped_profile_key_for_patient(
+    scope: _MemoryScopeProtocol, patient_profile: dict[str, Any]
+) -> tuple[str, str, str]:
+    tenant_id, facility_id = scope._tenant_context_for_memory()
+    key = scope._patient_hash_for_memory(
+        patient_profile,
+        tenant_id=tenant_id,
+        facility_id=facility_id,
+    )
+    return tenant_id, facility_id, key
+
+
+def _scoped_profile_key(
+    scope: _MemoryScopeProtocol, profile_hash: str | dict[str, Any]
+) -> tuple[str, str, str]:
+    tenant_id, facility_id = scope._tenant_context_for_memory()
+    scoped_profile_hash = scope._resolve_profile_hash_for_memory(
+        profile_hash,
+        tenant_id=tenant_id,
+        facility_id=facility_id,
+    )
+    return tenant_id, facility_id, scoped_profile_hash
+
+
 class MemoryAuditFeedbackMixin:
     async def write_pipeline_audit(
         self: _MemoryScopeProtocol,
@@ -36,10 +59,7 @@ class MemoryAuditFeedbackMixin:
         model_version: str,
         consent_flag: bool,
     ) -> None:
-        tenant_id, facility_id = self._tenant_context_for_memory()
-        key = self._patient_hash_for_memory(
-            patient_profile, tenant_id=tenant_id, facility_id=facility_id
-        )
+        tenant_id, facility_id, key = _scoped_profile_key_for_patient(self, patient_profile)
         now = datetime.now(UTC)
         async with self._pool_or_raise().acquire() as conn:
             await conn.execute(
@@ -53,7 +73,7 @@ class MemoryAuditFeedbackMixin:
                 key,
                 run_id,
                 now,
-                json.dumps(outcome_tier_counts),
+                outcome_tier_counts,
                 model_version,
                 consent_flag,
             )
@@ -61,12 +81,7 @@ class MemoryAuditFeedbackMixin:
     async def list_pipeline_audit(
         self: _MemoryScopeProtocol, profile_hash: str | dict[str, Any]
     ) -> list[dict[str, Any]]:
-        tenant_id, facility_id = self._tenant_context_for_memory()
-        scoped_profile_hash = self._resolve_profile_hash_for_memory(
-            profile_hash,
-            tenant_id=tenant_id,
-            facility_id=facility_id,
-        )
+        tenant_id, facility_id, scoped_profile_hash = _scoped_profile_key(self, profile_hash)
         async with self._pool_or_raise().acquire() as conn:
             rows = await conn.fetch(
                 """
@@ -84,7 +99,11 @@ class MemoryAuditFeedbackMixin:
                 "profile_hash": r["profile_hash"],
                 "run_id": r["run_id"],
                 "timestamp": r["timestamp"].isoformat(),
-                "outcome_tier_counts": dict(r["outcome_tier_counts"]),
+                "outcome_tier_counts": (
+                    {str(k): int(v) for k, v in r["outcome_tier_counts"].items()}
+                    if isinstance(r["outcome_tier_counts"], dict)
+                    else {}
+                ),
                 "model_version": r["model_version"],
                 "consent_flag": bool(r["consent_flag"]),
             }
@@ -99,10 +118,7 @@ class MemoryAuditFeedbackMixin:
         verdict: str,
         note: str,
     ) -> None:
-        tenant_id, facility_id = self._tenant_context_for_memory()
-        key = self._patient_hash_for_memory(
-            patient_profile, tenant_id=tenant_id, facility_id=facility_id
-        )
+        tenant_id, facility_id, key = _scoped_profile_key_for_patient(self, patient_profile)
         now = datetime.now(UTC)
         async with self._pool_or_raise().acquire() as conn:
             await conn.execute(
@@ -124,12 +140,7 @@ class MemoryAuditFeedbackMixin:
     async def list_feedback(
         self: _MemoryScopeProtocol, profile_hash: str | dict[str, Any]
     ) -> list[dict[str, Any]]:
-        tenant_id, facility_id = self._tenant_context_for_memory()
-        scoped_profile_hash = self._resolve_profile_hash_for_memory(
-            profile_hash,
-            tenant_id=tenant_id,
-            facility_id=facility_id,
-        )
+        tenant_id, facility_id, scoped_profile_hash = _scoped_profile_key(self, profile_hash)
         async with self._pool_or_raise().acquire() as conn:
             rows = await conn.fetch(
                 """
@@ -155,12 +166,7 @@ class MemoryAuditFeedbackMixin:
         ]
 
     async def erase_profile(self: _MemoryScopeProtocol, profile_hash: str | dict[str, Any]) -> None:
-        tenant_id, facility_id = self._tenant_context_for_memory()
-        scoped_profile_hash = self._resolve_profile_hash_for_memory(
-            profile_hash,
-            tenant_id=tenant_id,
-            facility_id=facility_id,
-        )
+        tenant_id, facility_id, scoped_profile_hash = _scoped_profile_key(self, profile_hash)
         async with self._pool_or_raise().acquire() as conn, conn.transaction():
             await conn.execute(
                 "DELETE FROM patient_runs WHERE profile_hash = $1 AND tenant_id = $2 AND facility_id = $3",

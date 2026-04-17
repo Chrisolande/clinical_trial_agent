@@ -55,30 +55,11 @@ async def run_pipeline(
     patient_profile: dict[str, Any], thread_id: str, *, stream: bool, console: Console
 ) -> dict[str, Any]:
     async with compile_supervisor_graph() as supervisor:
-        if (
-            stream
-            and hasattr(supervisor, "_react_agent")
-            and hasattr(supervisor._react_agent, "astream_events")
-        ):
-            async for evt in supervisor._react_agent.astream_events(
-                {
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": (
-                                "Match this patient to trials by calling tools in order: "
-                                "run_retrieval -> run_eligibility -> run_synthesis."
-                            ),
-                        }
-                    ]
-                },
-                config={"configurable": {"thread_id": thread_id}},
-                version="v1",
-            ):
-                event_name = str(evt.get("event", ""))
-                if event_name:
-                    console.print(f"[cyan]event:[/cyan] {event_name}")
+        if stream:
+            console.print("[cyan]event:[/cyan] supervisor.start")
         result = await supervisor.ainvoke(patient_profile, thread_id=thread_id, recursion_limit=25)
+        if stream:
+            console.print("[cyan]event:[/cyan] supervisor.complete")
         if not isinstance(result, dict):
             raise RuntimeError(f"Supervisor returned unexpected type: {type(result)!r}")
         return result

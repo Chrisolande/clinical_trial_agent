@@ -12,29 +12,38 @@ _INTERACTION_MATRIX: set[tuple[str, str]] = {
 }
 
 
+def _normalize_medication_dict_entry(med: dict[str, Any]) -> str:
+    raw_name = med.get("name")
+    if not isinstance(raw_name, str) or not raw_name.strip():
+        raise ValueError("Medication safety validation failed: medication.name is required")
+    name = raw_name.strip().lower()
+    dose = med.get("dose")
+    if dose is not None and str(dose).strip() and not _DOSE_RE.match(str(dose)):
+        raise ValueError(f"Medication safety validation failed: malformed dose '{dose}' for {name}")
+    return name
+
+
+def _normalize_medication_entry(med: Any) -> str:
+    if isinstance(med, dict):
+        return _normalize_medication_dict_entry(med)
+    if not isinstance(med, str) or not med.strip():
+        raise ValueError("Medication safety validation failed: empty medication entry")
+    return med.strip().lower()
+
+
 def _normalize_medications(patient_profile: dict[str, Any]) -> list[str]:
     meds: list[str] = []
     for med in patient_profile.get("medications", []) or []:
-        if isinstance(med, dict):
-            name = str(med.get("name", "")).strip().lower()
-            if not name:
-                raise ValueError("Medication safety validation failed: medication.name is required")
-            dose = med.get("dose")
-            if dose is not None and str(dose).strip() and not _DOSE_RE.match(str(dose)):
-                raise ValueError(
-                    f"Medication safety validation failed: malformed dose '{dose}' for {name}"
-                )
-            meds.append(name)
-        else:
-            name = str(med).strip().lower()
-            if not name:
-                raise ValueError("Medication safety validation failed: empty medication entry")
-            meds.append(name)
+        meds.append(_normalize_medication_entry(med))
     return list(dict.fromkeys(meds))
 
 
 def _normalize_interventions(trial: dict[str, Any]) -> list[str]:
-    values = [str(v).strip().lower() for v in trial.get("interventions", []) if str(v).strip()]
+    values = [
+        value.strip().lower()
+        for value in trial.get("interventions", []) or []
+        if isinstance(value, str) and value.strip()
+    ]
     return list(dict.fromkeys(values))
 
 
