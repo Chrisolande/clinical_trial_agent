@@ -177,7 +177,16 @@ def build_text_report(report_json: dict[str, Any]) -> str:
 
     qa_issues = report_json.get("qa_issues", [])
     if qa_issues:
-        lines += ["QA ISSUES", "-" * 40] + [f"  - {issue}" for issue in qa_issues] + [""]
+        lines += ["QA ISSUES", "-" * 40]
+        for issue in qa_issues:
+            if isinstance(issue, dict):
+                sev = str(issue.get("severity", "unknown")).upper()
+                code = str(issue.get("code", "UNSPECIFIED"))
+                msg = str(issue.get("message", ""))
+                lines.append(f"  - [{sev}] {code}: {msg}")
+            else:
+                lines.append(f"  - {issue}")
+        lines.append("")
 
     lines += ["METHODOLOGY", "-" * 40, methodology_note, ""]
 

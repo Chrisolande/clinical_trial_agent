@@ -1,6 +1,16 @@
-from typing import Any
+from typing import Any, TypedDict
 
-from config import TIER_ORDER
+from clinical_trial_agent.config import TIER_ORDER
+
+
+class QAIssue(TypedDict):
+    code: str
+    severity: str
+    message: str
+
+
+def _issue(code: str, severity: str, message: str) -> QAIssue:
+    return {"code": code, "severity": severity, "message": message}
 
 
 async def run_qa_check(
@@ -8,17 +18,17 @@ async def run_qa_check(
     eligibility_verdicts: dict[str, dict[str, Any]],
     scored_trials: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    issues: list[str] = []
+    issues: list[QAIssue] = []
     issues.extend(_check_score_verdict_alignment(eligibility_verdicts, scored_trials))
     issues.extend(_check_age_consistency(patient_profile, eligibility_verdicts))
-    qa_passed = not any("CRITICAL" in issue.upper() for issue in issues)
+    qa_passed = not any(issue["severity"] == "critical" for issue in issues)
     return {"qa_passed": qa_passed, "qa_issues": issues}
 
 
 def _check_age_consistency(
     patient_profile: dict[str, Any],
     eligibility_verdicts: dict[str, dict[str, Any]],
-) -> list[str]:
+) -> list[QAIssue]:
     patient_age = patient_profile.get("age")
     if not isinstance(patient_age, int | float):
         return []
@@ -26,7 +36,9 @@ def _check_age_consistency(
     return _detect_age_inconsistency(int(patient_age), age_verdicts)
 
 
-def _detect_age_inconsistency(patient_age: int, age_verdicts: list[tuple[str, str]]) -> list[str]:
+def _detect_age_inconsistency(
+    patient_age: int, age_verdicts: list[tuple[str, str]]
+) -> list[QAIssue]:
     by_trial: dict[str, set[str]] = {}
     for trial_id, verdict in age_verdicts:
         by_trial.setdefault(trial_id, set()).add(verdict)
@@ -36,9 +48,13 @@ def _detect_age_inconsistency(patient_age: int, age_verdicts: list[tuple[str, st
     if contradictory_trials:
         sample = contradictory_trials[:3]
         return [
-            (
-                f"Age criterion inconsistency within trial(s) for patient age {patient_age}: "
-                f"{sample}. Review parsed age criteria for contradictory verdicts."
+            _issue(
+                "AGE_VERDICT_CONTRADICTION",
+                "critical",
+                (
+                    f"Age criterion inconsistency within trial(s) for patient age {patient_age}: "
+                    f"{sample}. Review parsed age criteria for contradictory verdicts."
+                ),
             )
         ]
     return []
@@ -61,8 +77,8 @@ def _extract_age_verdicts(
 def _check_score_verdict_alignment(
     eligibility_verdicts: dict[str, dict[str, Any]],
     scored_trials: list[dict[str, Any]],
-) -> list[str]:
-    issues: list[str] = []
+) -> list[QAIssue]:
+    issues: list[QAIssue] = []
     score_lookup = {str(trial["trial_id"]): trial for trial in scored_trials if "trial_id" in trial}
     for trial_id, verdict in eligibility_verdicts.items():
         scored = score_lookup.get(trial_id)
@@ -73,12 +89,24 @@ def _check_score_verdict_alignment(
         tier = str(scored.get("tier", "weak"))
         if hard_failures >= 1 and TIER_ORDER.get(tier, 0) >= TIER_ORDER["moderate"]:
             issues.append(
-                f"Inconsistency: {trial_id} has hard exclusion failures but tier={tier}. "
-                "Hard exclusions should strongly suppress ranking."
+                _issue(
+                    "HARD_EXCLUSION_RANKING_CONFLICT",
+                    "critical",
+                    (
+                        f"Inconsistency: {trial_id} has hard exclusion failures but tier={tier}. "
+                        "Hard exclusions should strongly suppress ranking."
+                    ),
+                )
             )
 
         uncertain = int(verdict.get("uncertain_count", 0))
         total = int(verdict.get("meets_count", 0)) + int(verdict.get("fails_count", 0)) + uncertain
         if total > 0 and uncertain == total and TIER_ORDER.get(tier, 0) >= TIER_ORDER["moderate"]:
-            issues.append(f"Warning: {trial_id} has all UNCERTAIN verdicts but tier={tier}.")
+            issues.append(
+                _issue(
+                    "ALL_UNCERTAIN_HIGH_TIER",
+                    "high",
+                    f"Warning: {trial_id} has all UNCERTAIN verdicts but tier={tier}.",
+                )
+            )
     return issues

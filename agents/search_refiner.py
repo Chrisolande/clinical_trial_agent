@@ -102,4 +102,4 @@ def _get_related_conditions(
 
 def should_continue_refining(retry_count: int) -> bool:
     """Return True if more refinement attempts are available."""
-    return retry_count < get_settings().max_retry_attempts
+    return retry_count < int(get_settings().max_retry_attempts)

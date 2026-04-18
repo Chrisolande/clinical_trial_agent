@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from config import TIER_ORDER
+from clinical_trial_agent.config import TIER_ORDER
 
 from .report_formatter import build_text_report
 from .report_synthesizer import generate_executive_summary
@@ -152,7 +152,7 @@ def _build_report_payload(
     trials_raw: list[dict[str, Any]],
     search_queries: list[str],
     decision_history: list[str],
-    qa_issues: list[str],
+    qa_issues: list[dict[str, Any]],
 ) -> dict[str, Any]:
     strong, moderate, weak, disqualified = _partition_trials(enriched_trials)
     return {
@@ -182,7 +182,7 @@ async def build_report(
     trials_raw: list[dict[str, Any]],
     search_queries: list[str],
     decision_history: list[str],
-    qa_issues: list[str],
+    qa_issues: list[dict[str, Any]],
 ) -> dict[str, Any]:
     ranked = _sort_by_tier_then_score(scored_trials)
     summary_data = await generate_executive_summary(patient_profile, ranked)

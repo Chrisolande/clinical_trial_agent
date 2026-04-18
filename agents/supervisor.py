@@ -195,7 +195,7 @@ class SupervisorOrchestrator:
         async with memory_ctx:
             memory = memory_ctx
             cached = await memory.lookup(patient_profile)
-            if cached:
+            if isinstance(cached, dict):
                 logger.info("Supervisor served result from episodic memory")
                 return cached
 
