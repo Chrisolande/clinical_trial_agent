@@ -97,7 +97,12 @@ The following checks run in CI:
 - **ruff** - linting and import hygiene
 - **mypy** - type checking with `disallow_untyped_defs`
 - **bandit** - security-focused static analysis
-- **pytest-cov** - test coverage, fail threshold at 70%
+- **detect-secrets** - fail-closed baseline policy + tracked-file secret scan against `.secrets.baseline`
+- **CI env hardening consistency** - enforces fail-closed consent and tenant/facility defaults for CI test jobs
+- **pytest-cov** - test coverage, fail threshold at 75%
+
+The canonical local/CI command flow is documented in
+`/home/runner/work/clinical_trial_agent/clinical_trial_agent/docs/runbook.md`.
 
 Run `python validate_env.py` locally before deployment to confirm all required secrets are present and the database is reachable.
 

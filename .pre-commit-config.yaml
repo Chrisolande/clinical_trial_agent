@@ -39,7 +39,7 @@ repos:
 
       - id: vulture
         name: vulture dead code
-        entry: vulture clinical_trial_agent/ whitelist.py --min-confidence 80
+        entry: vulture
         language: system
         pass_filenames: false
         files: ^clinical_trial_agent/
