@@ -1,4 +1,5 @@
 import pytest
+from agents.report_formatter import build_text_report
 from subagents.synthesis import nodes
 from subagents.synthesis import nodes as synthesis_nodes
 
@@ -13,12 +14,15 @@ async def test_run_qa_check_success_and_exception(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def ok_run(**_kwargs):
-        return {"qa_passed": False, "qa_issues": ["x"]}
+        return {
+            "qa_passed": False,
+            "qa_issues": [{"code": "X", "severity": "high", "message": "x"}],
+        }
 
     monkeypatch.setattr(nodes.qa_checker, "run_qa_check", ok_run)
     out = await nodes.run_qa_check({})
     assert out["qa_passed"] is False
-    assert out["qa_issues"] == ["x"]
+    assert out["qa_issues"] == [{"code": "X", "severity": "high", "message": "x"}]
 
     async def bad_run(**_kwargs):
         raise RuntimeError("bad")
@@ -40,7 +44,7 @@ def test_route_after_qa_branches() -> None:
 async def test_attempt_fix_and_flag_and_finalize() -> None:
     fixed = await nodes.attempt_qa_fix(
         {
-            "qa_issues": ["issue"],
+            "qa_issues": [{"code": "ISSUE", "severity": "medium", "message": "issue"}],
             "qa_fix_attempts": 0,
             "trial_scores": [
                 {"trial_id": "A", "tier": "weak", "score": 0.9},
@@ -51,12 +55,14 @@ async def test_attempt_fix_and_flag_and_finalize() -> None:
     assert fixed["qa_fix_attempts"] == 1
     assert fixed["trial_scores"][0]["trial_id"] == "B"
 
-    flagged = await nodes.flag_re_evaluation({"qa_issues": ["x"]})
+    flagged = await nodes.flag_re_evaluation(
+        {"qa_issues": [{"code": "X", "severity": "high", "message": "x"}]}
+    )
     assert flagged["synthesis_needs_re_evaluation"] is True
 
     finalized = await nodes.finalize_synthesis_output(
         {
-            "qa_issues": ["q"],
+            "qa_issues": [{"code": "Q", "severity": "medium", "message": "q"}],
             "qa_passed": False,
             "report_json": {"ok": True},
             "report_text": "t",
@@ -67,6 +73,34 @@ async def test_attempt_fix_and_flag_and_finalize() -> None:
     )
     assert finalized["decision_history"] == ["d"]
     assert finalized["errors"] == ["e"]
+
+
+def test_build_text_report_formats_structured_and_string_qa_issues() -> None:
+    base_report = {
+        "generated_at": "2026-04-25T00:00:00+00:00",
+        "patient_summary": "age=50",
+        "executive_summary": "summary",
+        "total_trials_searched": 1,
+        "total_trials_evaluated": 1,
+        "strong_matches": [],
+        "moderate_matches": [],
+        "excluded_trial_count": 0,
+        "excluded_trials": [],
+        "information_gaps": [],
+        "methodology_note": "method",
+        "search_queries_used": [],
+        "decision_history": [],
+        "ranked_trials": [],
+    }
+    structured = dict(base_report)
+    structured["qa_issues"] = [{"code": "A", "severity": "critical", "message": "structured issue"}]
+    text_structured = build_text_report(structured)
+    assert "[CRITICAL] A: structured issue" in text_structured
+
+    legacy = dict(base_report)
+    legacy["qa_issues"] = ["legacy issue"]
+    text_legacy = build_text_report(legacy)
+    assert "legacy issue" in text_legacy
 
 
 def test_collect_synthesis_inputs_merges_decisions() -> None:

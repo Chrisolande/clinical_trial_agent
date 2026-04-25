@@ -5,13 +5,39 @@ from loguru import logger
 
 from config import TIER_ORDER
 
-from .state import SynthesisState
+from .state import QAIssue, SynthesisState
 
 
 def _exception_label(exc: Exception) -> str:
     if isinstance(exc, TimeoutError):
         return "timeout"
     return exc.__class__.__name__
+
+
+def _normalize_qa_issues(issues: Any) -> list[QAIssue]:
+    normalized: list[QAIssue] = []
+    if not isinstance(issues, list):
+        return normalized
+    for issue in issues:
+        if isinstance(issue, dict):
+            normalized.append(
+                {
+                    "code": str(issue.get("code", "UNSPECIFIED")),
+                    "severity": str(issue.get("severity", "medium")),
+                    "message": str(issue.get("message", "")),
+                }
+            )
+            continue
+        message = str(issue).strip()
+        if message:
+            normalized.append(
+                {
+                    "code": "UNSPECIFIED",
+                    "severity": "medium",
+                    "message": message,
+                }
+            )
+    return normalized
 
 
 async def run_qa_check(state: SynthesisState) -> dict[str, Any]:
@@ -22,7 +48,7 @@ async def run_qa_check(state: SynthesisState) -> dict[str, Any]:
             scored_trials=state.get("trial_scores") or [],
         )
         qa_passed = result.get("qa_passed", True)
-        issues = result.get("qa_issues", [])
+        issues = _normalize_qa_issues(result.get("qa_issues", []))
         return {
             "qa_passed": qa_passed,
             "qa_issues": issues,
@@ -35,7 +61,13 @@ async def run_qa_check(state: SynthesisState) -> dict[str, Any]:
         logger.error("run_qa_check failed ({}) : {}", label, exc)
         return {
             "qa_passed": True,
-            "qa_issues": [f"QA check error ({label}, proceeding): {exc}"],
+            "qa_issues": [
+                {
+                    "code": "QA_CHECK_ERROR",
+                    "severity": "medium",
+                    "message": f"QA check error ({label}, proceeding): {exc}",
+                }
+            ],
             "new_errors": [f"qa_check[{label}]: {exc}"],
             "new_decision_entries": [f"QA check failed, proceeding anyway: {exc}"],
         }
@@ -54,7 +86,7 @@ def route_after_qa(
 
 async def attempt_qa_fix(state: SynthesisState) -> dict[str, Any]:
     """Attempt to fix QA issues by re-sorting/re-scoring within synthesis."""
-    issues = state.get("qa_issues") or []
+    issues = _normalize_qa_issues(state.get("qa_issues") or [])
     scored = list(state.get("trial_scores") or [])
 
     # Re-sort by tier first, then score within the same tier
@@ -71,18 +103,20 @@ async def attempt_qa_fix(state: SynthesisState) -> dict[str, Any]:
         "trial_scores": scored,
         "qa_fix_attempts": fix_attempts + 1,
         "new_decision_entries": [
-            f"QA fix attempt {fix_attempts + 1}: re-sorted trial rankings to resolve: {issues[:2]}"
+            f"QA fix attempt {fix_attempts + 1}: re-sorted trial rankings to resolve: "
+            f"{[issue.get('code', 'UNSPECIFIED') for issue in issues[:2]]}"
         ],
     }
 
 
 async def flag_re_evaluation(state: SynthesisState) -> dict[str, Any]:
     """Flag that the supervisor should re-run eligibility reasoning."""
-    issues = state.get("qa_issues") or []
+    issues = _normalize_qa_issues(state.get("qa_issues") or [])
     return {
         "synthesis_needs_re_evaluation": True,
         "new_decision_entries": [
-            f"Synthesis flagging re-evaluation needed due to persistent QA issues: {issues[:3]}"
+            "Synthesis flagging re-evaluation needed due to persistent QA issues: "
+            f"{[issue.get('code', 'UNSPECIFIED') for issue in issues[:3]]}"
         ],
     }
 
@@ -99,7 +133,7 @@ def _collect_synthesis_inputs(state: SynthesisState) -> dict[str, Any]:
             list(state.get("decision_history") or [])
             + list(state.get("new_decision_entries") or [])
         ),
-        "qa_issues": state.get("qa_issues") or [],
+        "qa_issues": _normalize_qa_issues(state.get("qa_issues") or []),
     }
 
 
@@ -129,7 +163,7 @@ async def generate_report_node(state: SynthesisState) -> dict[str, Any]:
 async def finalize_synthesis_output(state: SynthesisState) -> dict[str, Any]:
     """Collect new_decision_entries and new_errors into output keys."""
     return {
-        "qa_issues": list(state.get("qa_issues") or []),
+        "qa_issues": _normalize_qa_issues(state.get("qa_issues") or []),
         "qa_passed": bool(state.get("qa_passed", True)),
         "report_json": state.get("report_json"),
         "report_text": state.get("report_text"),

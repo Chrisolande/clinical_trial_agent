@@ -156,17 +156,27 @@ class EpisodicMemory(MemoryAuditFeedbackMixin, PostgresBase):
             await conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_physician_feedback_tenant_facility ON physician_feedback (tenant_id, facility_id, created_at DESC)"
             )
-            await conn.execute("ALTER TABLE llm_cache ADD COLUMN IF NOT EXISTS prefix TEXT")
-            await conn.execute("UPDATE llm_cache SET prefix = '' WHERE prefix IS NULL")
-            await conn.execute("ALTER TABLE llm_cache ALTER COLUMN prefix SET NOT NULL")
-            await conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_llm_cache_prefix ON llm_cache (prefix)"
-            )
             row = await conn.fetchrow("SELECT version FROM schema_version LIMIT 1")
+            current_version = int(row["version"]) if row and "version" in row else 0
+
+            if current_version < 6:
+                await conn.execute("ALTER TABLE llm_cache ADD COLUMN IF NOT EXISTS prefix TEXT")
+                needs_backfill = await conn.fetchval(
+                    "SELECT EXISTS (SELECT 1 FROM llm_cache WHERE prefix IS NULL LIMIT 1)"
+                )
+                if bool(needs_backfill):
+                    await conn.execute("UPDATE llm_cache SET prefix = '' WHERE prefix IS NULL")
+                await conn.execute("ALTER TABLE llm_cache ALTER COLUMN prefix SET NOT NULL")
+                await conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_llm_cache_prefix ON llm_cache (prefix)"
+                )
+
             if row is None:
                 await conn.execute(
                     "INSERT INTO schema_version (version) VALUES ($1)", _SCHEMA_VERSION
                 )
+            elif current_version < _SCHEMA_VERSION:
+                await conn.execute("UPDATE schema_version SET version = $1", _SCHEMA_VERSION)
 
     async def lookup(self, patient_profile: dict[str, Any]) -> dict[str, Any] | None:
         tenant_id, facility_id = _tenant_context()
@@ -225,7 +235,8 @@ class EpisodicMemory(MemoryAuditFeedbackMixin, PostgresBase):
         logger.info("Episodic memory stored", profile_hash=key[:8], ttl_days=self._ttl_days)
 
     async def purge_expired(self) -> int:
-        return await self._purge_expired("patient_runs")
+        removed = await self._purge_expired("patient_runs")
+        return int(removed)
 
     async def list_runs(self) -> list[dict[str, Any]]:
         tenant_id, facility_id = _tenant_context()

@@ -4,6 +4,12 @@ import operator
 from typing import Annotated, Any, TypedDict
 
 
+class QAIssue(TypedDict):
+    code: str
+    severity: str
+    message: str
+
+
 class SynthesisInput(TypedDict):
     """Keys the supervisor passes INTO the synthesis sub-agent."""
 
@@ -20,7 +26,7 @@ class SynthesisInput(TypedDict):
 class SynthesisOutput(TypedDict):
     """Keys the synthesis sub-agent writes BACK to supervisor state."""
 
-    qa_issues: list[str]
+    qa_issues: list[QAIssue]
     qa_passed: bool
     report_json: dict[str, Any] | None
     report_text: str | None
@@ -46,7 +52,7 @@ class SynthesisState(TypedDict):
     qa_fix_attempts: int
 
     # Output fields
-    qa_issues: list[str]
+    qa_issues: list[QAIssue]
     qa_passed: bool
     report_json: dict[str, Any] | None
     report_text: str | None

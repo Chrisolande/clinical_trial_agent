@@ -1,6 +1,6 @@
 import logging
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any, ParamSpec, TypeVar, cast
 
 import httpx
 import openai
@@ -9,12 +9,12 @@ from tenacity import (
     RetryError,
     before_sleep_log,
     retry,
-    retry_if_exception_type,
+    retry_if_exception,
     stop_after_attempt,
     wait_exponential_jitter,
 )
 
-from config import get_settings
+from clinical_trial_agent.config import get_settings
 
 __all__ = ["RetryError", "http_retry", "llm_retry"]
 std_logger = logging.getLogger("tenacity.retry")
@@ -25,7 +25,8 @@ _TRANSIENT_LLM_ERRORS = (
     openai.APITimeoutError,
     openai.APIConnectionError,
 )
-_TRANSIENT_HTTP_ERRORS = (httpx.HTTPStatusError, httpx.RequestError)
+P = ParamSpec("P")
+R = TypeVar("R")
 
 
 class _LoguruLoggingHandler(logging.Handler):
@@ -56,11 +57,31 @@ def _base_retry(retry_condition: Any) -> Any:
     )
 
 
-def llm_retry[**P, R](func: Callable[P, R]) -> Callable[P, R]:
-    wrapped = _base_retry(retry_if_exception_type(_TRANSIENT_LLM_ERRORS))(func)
+def _is_retryable_http_exception(exc: BaseException) -> bool:
+    if isinstance(exc, httpx.RequestError):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = int(exc.response.status_code)
+        return status == 429 or status >= 500
+    return False
+
+
+def _is_retryable_llm_exception(exc: BaseException) -> bool:
+    if isinstance(exc, _TRANSIENT_LLM_ERRORS):
+        return True
+    if isinstance(exc, openai.RateLimitError):
+        return True
+    if isinstance(exc, openai.APIStatusError):
+        status = int(exc.status_code)
+        return status == 429 or status >= 500
+    return False
+
+
+def llm_retry(func: Callable[P, R]) -> Callable[P, R]:  # noqa: UP047
+    wrapped = _base_retry(retry_if_exception(_is_retryable_llm_exception))(func)
     return cast("Callable[P, R]", wrapped)  # tenacity decorator erases callable generics
 
 
-def http_retry[**P, R](func: Callable[P, R]) -> Callable[P, R]:
-    wrapped = _base_retry(retry_if_exception_type(_TRANSIENT_HTTP_ERRORS))(func)
+def http_retry(func: Callable[P, R]) -> Callable[P, R]:  # noqa: UP047
+    wrapped = _base_retry(retry_if_exception(_is_retryable_http_exception))(func)
     return cast("Callable[P, R]", wrapped)  # tenacity decorator erases callable generics

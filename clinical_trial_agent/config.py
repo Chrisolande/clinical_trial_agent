@@ -108,7 +108,7 @@ class Settings(BaseSettings):
 
     @field_validator("llm_provider", mode="before")
     @classmethod
-    def _normalize_provider(cls, value: object) -> str:
+    def _normalize_provider(_cls, value: object) -> str:
         normalized = str(value or "deepseek").strip().lower()
         if normalized in {"deepseek", "openai", "anthropic", "ollama"}:
             return normalized
@@ -116,12 +116,12 @@ class Settings(BaseSettings):
 
     @field_validator("log_level", mode="before")
     @classmethod
-    def _normalize_log_level(cls, value: object) -> str:
+    def _normalize_log_level(_cls, value: object) -> str:
         return str(value or "INFO").upper()
 
     @field_validator("ctgov_proxy_url")
     @classmethod
-    def _validate_ctgov_proxy_url(cls, value: str | None) -> str | None:
+    def _validate_ctgov_proxy_url(_cls, value: str | None) -> str | None:
         if not value:
             return None
         parsed = urlparse(value)

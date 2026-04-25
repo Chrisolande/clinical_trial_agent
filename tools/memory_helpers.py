@@ -84,7 +84,8 @@ def get_fernet_key() -> bytes:
 
 
 def serialize_encrypted_json(payload: dict[str, Any], fernet: Fernet) -> str:
-    return fernet.encrypt(json.dumps(payload, default=str).encode("utf-8")).decode("utf-8")
+    encrypted = fernet.encrypt(json.dumps(payload, default=str).encode("utf-8")).decode("utf-8")
+    return str(encrypted)
 
 
 def deserialize_encrypted_json(payload: str, fernet: Fernet) -> dict[str, Any] | None:

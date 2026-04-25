@@ -17,8 +17,18 @@ async def run_qa_check(
     patient_profile: dict[str, Any],
     eligibility_verdicts: dict[str, dict[str, Any]],
     scored_trials: list[dict[str, Any]],
+    retrieval_errors: list[str] | None = None,
 ) -> dict[str, Any]:
     issues: list[QAIssue] = []
+    errors = [str(err).strip() for err in retrieval_errors or [] if str(err).strip()]
+    if errors and not scored_trials:
+        issues.append(
+            _issue(
+                "RETRIEVAL_FAILED_EMPTY_RESULT",
+                "critical",
+                "Retrieval stage produced errors and no scored trials were available for synthesis.",
+            )
+        )
     issues.extend(_check_score_verdict_alignment(eligibility_verdicts, scored_trials))
     issues.extend(_check_age_consistency(patient_profile, eligibility_verdicts))
     qa_passed = not any(issue["severity"] == "critical" for issue in issues)

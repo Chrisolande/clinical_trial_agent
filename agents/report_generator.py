@@ -13,6 +13,30 @@ _METHODOLOGY_NOTE = (
 )
 
 
+def _normalize_qa_issues(qa_issues: list[dict[str, Any] | str]) -> list[dict[str, str]]:
+    normalized: list[dict[str, str]] = []
+    for issue in qa_issues:
+        if isinstance(issue, dict):
+            normalized.append(
+                {
+                    "code": str(issue.get("code", "UNSPECIFIED")),
+                    "severity": str(issue.get("severity", "medium")),
+                    "message": str(issue.get("message", "")),
+                }
+            )
+            continue
+        message = str(issue).strip()
+        if message:
+            normalized.append(
+                {
+                    "code": "UNSPECIFIED",
+                    "severity": "medium",
+                    "message": message,
+                }
+            )
+    return normalized
+
+
 def _severity_for_missing_item(item: str, tier: str) -> str:
     text = item.lower()
     high_markers = [
@@ -152,15 +176,25 @@ def _build_report_payload(
     trials_raw: list[dict[str, Any]],
     search_queries: list[str],
     decision_history: list[str],
-    qa_issues: list[dict[str, Any]],
+    qa_issues: list[dict[str, str]],
+    retrieval_errors: list[str],
 ) -> dict[str, Any]:
     strong, moderate, weak, disqualified = _partition_trials(enriched_trials)
+    retrieval_failed = bool(retrieval_errors) and len(enriched_trials) == 0
+    effective_summary = summary_data.get("executive_summary", "")
+    if retrieval_failed:
+        effective_summary = (
+            "Trial retrieval failed before eligibility fan-out completed. "
+            "No matches are reported because zero trials were retrieved/evaluated."
+        )
     return {
         "generated_at": datetime.now(UTC).isoformat(),
         "patient_summary": summary_data.get("patient_summary", ""),
-        "executive_summary": summary_data.get("executive_summary", ""),
+        "executive_summary": effective_summary,
         "total_trials_searched": len(trials_raw),
         "total_trials_evaluated": len(enriched_trials),
+        "retrieval_failed": retrieval_failed,
+        "retrieval_errors": list(retrieval_errors),
         "strong_matches": strong,
         "moderate_matches": moderate,
         "excluded_trial_count": len(weak) + len(disqualified),
@@ -182,7 +216,8 @@ async def build_report(
     trials_raw: list[dict[str, Any]],
     search_queries: list[str],
     decision_history: list[str],
-    qa_issues: list[dict[str, Any]],
+    qa_issues: list[dict[str, Any] | str],
+    retrieval_errors: list[str] | None = None,
 ) -> dict[str, Any]:
     ranked = _sort_by_tier_then_score(scored_trials)
     summary_data = await generate_executive_summary(patient_profile, ranked)
@@ -196,7 +231,8 @@ async def build_report(
         trials_raw=trials_raw,
         search_queries=search_queries,
         decision_history=decision_history,
-        qa_issues=qa_issues,
+        qa_issues=_normalize_qa_issues(qa_issues),
+        retrieval_errors=list(retrieval_errors or []),
     )
 
 
