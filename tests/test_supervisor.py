@@ -132,7 +132,7 @@ async def test_supervisor_calls_subagents_in_sequence(
 
 @pytest.mark.asyncio
 async def test_supervisor_uses_single_memory_context(monkeypatch: pytest.MonkeyPatch) -> None:
-    from config import get_settings
+    from clinical_trial_agent.config import get_settings
 
     monkeypatch.setenv("SUPERVISOR_USE_REACT", "true")
     get_settings.cache_clear()
@@ -197,3 +197,65 @@ def test_feedback_adjustment_changes_ranking() -> None:
 
     adjusted = _apply_feedback_adjustments(scored, feedback)
     assert adjusted[0]["trial_id"] == "NCT2"
+
+
+@pytest.mark.asyncio
+async def test_supervisor_retry_budget_includes_initial_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    orchestrator = SupervisorOrchestrator()
+    calls: list[int] = []
+    monkeypatch.setattr(
+        "agents.supervisor.get_settings",
+        lambda: type(
+            "S",
+            (),
+            {
+                "one_pass_mode": False,
+                "max_retry_attempts": 2,
+                "max_trials_for_eligibility": 5,
+            },
+        )(),
+    )
+
+    async def fake_retrieval(**kwargs: Any) -> dict[str, Any]:
+        calls.append(int(kwargs["retry_count"]))
+        return {"trials_raw": [], "trials_deduplicated": [], "search_queries": []}
+
+    async def fake_eligibility(**_: Any) -> dict[str, Any]:
+        return {"trial_scores": [], "retrieval_needs_broadening": True}
+
+    async def fake_synthesis(**_: Any) -> dict[str, Any]:
+        return {"report_json": {"ok": True}, "report_text": "done"}
+
+    class DummyMemory:
+        async def list_feedback(self, *_: Any) -> list[dict[str, Any]]:
+            return []
+
+    monkeypatch.setattr(orchestrator, "run_retrieval", fake_retrieval)
+    monkeypatch.setattr(orchestrator, "run_eligibility", fake_eligibility)
+    monkeypatch.setattr(orchestrator, "run_synthesis", fake_synthesis)
+    result = await orchestrator._run_tools_pipeline(
+        {"age": 40}, thread_id="retry-thread", memory=DummyMemory()
+    )
+    assert result["report_text"] == "done"
+    assert calls == [0, 1, 2]
+
+
+def test_route_after_eligibility_respects_retry_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    from clinical_trial_agent.langgraph_app import route_after_eligibility
+
+    monkeypatch.setattr(
+        "clinical_trial_agent.langgraph_app.get_settings",
+        lambda: type("S", (), {"one_pass_mode": False, "max_retry_attempts": 2})(),
+    )
+    assert (
+        route_after_eligibility({"eligibility_result": {"retrieval_needs_broadening": True}})
+        == "retry_retrieval"
+    )
+    assert (
+        route_after_eligibility(
+            {"retry_count": 2, "eligibility_result": {"retrieval_needs_broadening": True}}
+        )
+        == "run_synthesis"
+    )

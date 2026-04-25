@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from cryptography.fernet import Fernet
 
-from memory import EpisodicMemory, _serialize_encrypted_json
+from clinical_trial_agent.memory import EpisodicMemory, _serialize_encrypted_json
 
 
 @pytest.fixture
@@ -33,7 +33,7 @@ def mock_connection() -> AsyncMock:
     return conn
 
 
-@patch("memory.get_settings")
+@patch("clinical_trial_agent.memory.get_settings")
 async def test_episodic_memory_init_requires_encryption_key(
     mock_settings: MagicMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:

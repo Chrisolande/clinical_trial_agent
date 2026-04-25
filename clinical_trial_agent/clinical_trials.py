@@ -95,6 +95,62 @@ async def _request_with_transport(
     return await client.get(url, params=params, timeout=request_timeout)
 
 
+async def _sleep_before_retry(attempt: int, backoff: float, retries: int) -> bool:
+    if attempt >= retries - 1:
+        return False
+    await asyncio.sleep(backoff**attempt)
+    return True
+
+
+def _is_transient_status(status: int) -> bool:
+    return status == 429 or 500 <= status <= 599
+
+
+async def _try_urllib_fallback_on_403(url: str, params: dict[str, Any]) -> dict[str, Any] | None:
+    if _contains_phi_params(params):
+        return None
+    try:
+        payload = await asyncio.to_thread(_urllib_get_json, url, params, 30.0)
+    except Exception as exc:
+        logger.warning("CT.gov urllib fallback failed after 403: {}", exc)
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _parse_json_payload(response: httpx.Response, status: int) -> dict[str, Any]:
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise ClinicalTrialsClientError(
+            "ClinicalTrials.gov returned invalid JSON payload",
+            status_code=status,
+            retryable=False,
+        ) from exc
+
+    if not isinstance(payload, dict):
+        raise ClinicalTrialsClientError(
+            "ClinicalTrials.gov payload is not an object",
+            status_code=status,
+            retryable=False,
+        )
+    return payload
+
+
+def _raise_client_error_for_status(status: int) -> None:
+    if status == 403:
+        raise ClinicalTrialsClientError(
+            "ClinicalTrials.gov request rejected (status=403)",
+            status_code=403,
+            retryable=False,
+        )
+    if 400 <= status <= 499:
+        raise ClinicalTrialsClientError(
+            f"ClinicalTrials.gov request rejected (status={status})",
+            status_code=status,
+            retryable=False,
+        )
+
+
 async def _request_json_with_retry(url: str, params: dict[str, Any]) -> dict[str, Any]:
     settings = get_settings()
     retries = max(1, settings.ctgov_retry_attempts)
@@ -107,8 +163,7 @@ async def _request_json_with_retry(url: str, params: dict[str, Any]) -> dict[str
                 response = await _request_with_transport(client, url, params, timeout)
             except httpx.RequestError as exc:
                 logger.warning("CT.gov request error on attempt {}: {}", attempt + 1, exc)
-                if attempt < retries - 1:
-                    await asyncio.sleep(backoff**attempt)
+                if await _sleep_before_retry(attempt, backoff, retries):
                     continue
                 raise ClinicalTrialsClientError(
                     "ClinicalTrials.gov request failed due to connection or DNS error",
@@ -116,10 +171,9 @@ async def _request_json_with_retry(url: str, params: dict[str, Any]) -> dict[str
                 ) from exc
 
             status = response.status_code
-            if status == 429 or 500 <= status <= 599:
+            if _is_transient_status(status):
                 logger.warning("CT.gov transient status {} on attempt {}", status, attempt + 1)
-                if attempt < retries - 1:
-                    await asyncio.sleep(backoff**attempt)
+                if await _sleep_before_retry(attempt, backoff, retries):
                     continue
                 raise ClinicalTrialsClientError(
                     f"ClinicalTrials.gov transient failure after retries (status={status})",
@@ -128,45 +182,12 @@ async def _request_json_with_retry(url: str, params: dict[str, Any]) -> dict[str
                 )
 
             if status == 403:
-                allow_urllib_fallback = not _contains_phi_params(params)
-                if allow_urllib_fallback:
-                    try:
-                        fallback_payload = await asyncio.to_thread(
-                            _urllib_get_json, url, params, 30.0
-                        )
-                        if isinstance(fallback_payload, dict):
-                            return fallback_payload
-                    except Exception as exc:
-                        logger.warning("CT.gov urllib fallback failed after 403: {}", exc)
-                raise ClinicalTrialsClientError(
-                    "ClinicalTrials.gov request rejected (status=403)",
-                    status_code=403,
-                    retryable=False,
-                )
+                fallback_payload = await _try_urllib_fallback_on_403(url, params)
+                if fallback_payload is not None:
+                    return fallback_payload
 
-            if 400 <= status <= 499:
-                raise ClinicalTrialsClientError(
-                    f"ClinicalTrials.gov request rejected (status={status})",
-                    status_code=status,
-                    retryable=False,
-                )
-
-            try:
-                payload = response.json()
-            except ValueError as exc:
-                raise ClinicalTrialsClientError(
-                    "ClinicalTrials.gov returned invalid JSON payload",
-                    status_code=status,
-                    retryable=False,
-                ) from exc
-
-            if not isinstance(payload, dict):
-                raise ClinicalTrialsClientError(
-                    "ClinicalTrials.gov payload is not an object",
-                    status_code=status,
-                    retryable=False,
-                )
-            return payload
+            _raise_client_error_for_status(status)
+            return _parse_json_payload(response, status)
 
     raise ClinicalTrialsClientError(
         "ClinicalTrials.gov request failed unexpectedly", retryable=True

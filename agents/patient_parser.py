@@ -8,7 +8,7 @@ from prompts.patient_extraction import build_patient_extraction_prompt
 from tools.retry import llm_retry
 from tools.sanitizer import sanitize_patient_profile
 
-from config import external_llm_requires_consent, get_llm
+from clinical_trial_agent.config import external_llm_requires_consent, get_llm
 
 
 def _assert_external_llm_consent() -> None:

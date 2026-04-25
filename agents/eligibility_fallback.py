@@ -6,7 +6,7 @@ from loguru import logger
 from models.judge_verdict import JudgeVerdict
 from pydantic import ValidationError
 
-from constants import ELIGIBILITY_TIMEOUT_FALLBACK_MESSAGE
+from clinical_trial_agent.constants import ELIGIBILITY_TIMEOUT_FALLBACK_MESSAGE
 
 FALLBACK_VERDICT: dict[str, Any] = {
     "match_tier": "weak",

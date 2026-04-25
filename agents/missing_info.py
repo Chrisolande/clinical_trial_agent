@@ -13,7 +13,7 @@ from loguru import logger
 from models.missing_info import CompletenessAssessmentList
 from prompts.missinginfo import build_missing_info_human_prompt, build_missing_info_system_prompt
 
-from config import external_llm_requires_consent, get_llm, get_settings
+from clinical_trial_agent.config import external_llm_requires_consent, get_llm, get_settings
 
 
 def _assert_external_llm_consent() -> None:

@@ -12,9 +12,10 @@ from loguru import logger
 from subagents.eligibility.graph import compiled_eligibility_graph
 from subagents.retrieval.graph import compiled_retrieval_graph
 from subagents.synthesis.graph import compiled_synthesis_graph
+from tools.telemetry import trace_span
 
-from config import TIER_ORDER, get_settings
-from memory import EpisodicMemory, get_checkpointer
+from clinical_trial_agent.config import TIER_ORDER, get_settings
+from clinical_trial_agent.memory import EpisodicMemory, get_checkpointer
 
 PatientSummary = dict[str, Any]
 TrialSummary = dict[str, Any]
@@ -25,6 +26,42 @@ def _require_dict(value: Any, *, source: str) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
     raise TypeError(f"{source} must return dict, got {type(value)!r}")
+
+
+def _normalize_retrieval_result(value: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **value,
+        "trials_raw": list(value.get("trials_raw", [])),
+        "trials_deduplicated": list(value.get("trials_deduplicated", [])),
+        "search_queries": list(value.get("search_queries", [])),
+    }
+
+
+def _normalize_eligibility_result(value: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **value,
+        "trial_scores": list(value.get("trial_scores", [])),
+        "decision_history": list(value.get("decision_history", [])),
+        "missing_info_recommendations": list(value.get("missing_info_recommendations", [])),
+        "retrieval_needs_broadening": bool(value.get("retrieval_needs_broadening", False)),
+    }
+
+
+def _normalize_supervisor_output(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {"report_json": None, "report_text": str(value)}
+    result = dict(value)
+    report_json = result.get("report_json")
+    if not isinstance(report_json, dict):
+        result["report_json"] = None
+    report_text = result.get("report_text")
+    if not isinstance(report_text, str) or not report_text.strip():
+        result["report_text"] = (
+            json.dumps(result["report_json"], default=str)
+            if isinstance(result["report_json"], dict)
+            else ""
+        )
+    return result
 
 
 def _apply_feedback_adjustments(
@@ -98,7 +135,7 @@ class SupervisorOrchestrator:
 
     @staticmethod
     def _get_llm() -> Any:
-        from config import get_llm
+        from clinical_trial_agent.config import get_llm
 
         return get_llm()
 
@@ -120,7 +157,7 @@ class SupervisorOrchestrator:
         if thread_id:
             config = {"configurable": {"thread_id": f"{thread_id}:retrieval:{retry_count}"}}
         result = await compiled_retrieval_graph.ainvoke(retrieval_input, config=config)
-        return _require_dict(result, source="retrieval graph")
+        return _normalize_retrieval_result(_require_dict(result, source="retrieval graph"))
 
     async def run_eligibility(
         self,
@@ -150,7 +187,7 @@ class SupervisorOrchestrator:
         if thread_id:
             config = {"configurable": {"thread_id": f"{thread_id}:eligibility:{attempt}"}}
         result = await compiled_eligibility_graph.ainvoke(eligibility_input, config=config)
-        return _require_dict(result, source="eligibility graph")
+        return _normalize_eligibility_result(_require_dict(result, source="eligibility graph"))
 
     async def run_synthesis(
         self,
@@ -200,7 +237,7 @@ class SupervisorOrchestrator:
                 or bool(str(cached.get("report_text", "")).strip())
             ):
                 logger.info("Supervisor served result from episodic memory")
-                return cached
+                return _normalize_supervisor_output(cached)
 
             patient_summary = self._project_patient_summary(patient_profile)
 
@@ -242,6 +279,7 @@ class SupervisorOrchestrator:
                         patient_summary, thread_id=thread_id, memory=memory
                     )
 
+            result = _normalize_supervisor_output(result)
             await memory.store(patient_profile, result)
             tier_counts = _compute_tier_counts(
                 list(result.get("report_json", {}).get("ranked_trials", []))
@@ -261,28 +299,42 @@ class SupervisorOrchestrator:
     ) -> dict[str, Any]:
         run_state = SupervisorRunState(retrieval_result={}, scored_trials=[], final_result={})
         settings = get_settings()
-        max_attempts = 1 if settings.one_pass_mode else settings.max_retry_attempts
+        max_retries = max(0, int(settings.max_retry_attempts))
+        max_attempts = 1 if settings.one_pass_mode else max_retries + 1
         eligibility: dict[str, Any] = {}
 
         for retry_count in range(max_attempts):
-            raw_retrieval = await self.run_retrieval(
-                patient_profile=patient_profile,
-                retry_count=retry_count,
-                thread_id=thread_id,
-            )
+            with trace_span(
+                "supervisor.run_retrieval",
+                run_id=thread_id,
+                attempt=retry_count,
+                slo_ms=6000,
+            ):
+                raw_retrieval = await self.run_retrieval(
+                    patient_profile=patient_profile,
+                    retry_count=retry_count,
+                    thread_id=thread_id,
+                )
             run_state.retrieval_result = self._compress_retrieval_output(raw_retrieval)
 
             limited_trials = list(run_state.retrieval_result.get("trials_deduplicated", []))[
                 : settings.max_trials_for_eligibility
             ]
 
-            eligibility = await self.run_eligibility(
-                patient_profile=patient_profile,
-                trials_deduplicated=limited_trials,
-                eligibility_verdicts=None,
-                thread_id=thread_id,
+            with trace_span(
+                "supervisor.run_eligibility",
+                run_id=thread_id,
                 attempt=retry_count,
-            )
+                trial_count=len(limited_trials),
+                slo_ms=12000,
+            ):
+                eligibility = await self.run_eligibility(
+                    patient_profile=patient_profile,
+                    trials_deduplicated=limited_trials,
+                    eligibility_verdicts=None,
+                    thread_id=thread_id,
+                    attempt=retry_count,
+                )
             run_state.scored_trials = self._compress_scored_trials(
                 list(eligibility.get("trial_scores", []))
             )
@@ -297,21 +349,22 @@ class SupervisorOrchestrator:
             feedback_rows = await memory.list_feedback(_profile_hash_for_feedback(patient_profile))
         adjusted_scores = _apply_feedback_adjustments(run_state.scored_trials, feedback_rows)
 
-        synthesis = await self.run_synthesis(
-            patient_profile=patient_profile,
-            trial_scores=adjusted_scores,
-            eligibility_verdicts=eligibility.get("eligibility_verdicts"),
-            missing_info_recommendations=eligibility.get("missing_info_recommendations"),
-            trials_raw=list(run_state.retrieval_result.get("trials_raw", [])),
-            search_queries=list(run_state.retrieval_result.get("search_queries", [])),
-            decision_history=self._compress_decision_history(
-                list(eligibility.get("decision_history", []))
-            ),
-            trials_with_criteria=eligibility.get("trials_with_criteria"),
-            thread_id=thread_id,
-        )
+        with trace_span("supervisor.run_synthesis", run_id=thread_id, slo_ms=6000):
+            synthesis = await self.run_synthesis(
+                patient_profile=patient_profile,
+                trial_scores=adjusted_scores,
+                eligibility_verdicts=eligibility.get("eligibility_verdicts"),
+                missing_info_recommendations=eligibility.get("missing_info_recommendations"),
+                trials_raw=list(run_state.retrieval_result.get("trials_raw", [])),
+                search_queries=list(run_state.retrieval_result.get("search_queries", [])),
+                decision_history=self._compress_decision_history(
+                    list(eligibility.get("decision_history", []))
+                ),
+                trials_with_criteria=eligibility.get("trials_with_criteria"),
+                thread_id=thread_id,
+            )
         run_state.final_result = self._unwrap_synthesis_result(synthesis)
-        return run_state.final_result
+        return _normalize_supervisor_output(run_state.final_result)
 
     @staticmethod
     def _unwrap_synthesis_result(result: Any) -> dict[str, Any]:

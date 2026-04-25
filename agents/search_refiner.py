@@ -2,7 +2,9 @@ from typing import Any
 
 from loguru import logger
 
-from config import get_settings
+from clinical_trial_agent.config import get_settings
+
+DEFAULT_MAX_RETRY_ATTEMPTS = 1
 
 
 def refine_search_strategy(
@@ -102,4 +104,6 @@ def _get_related_conditions(
 
 def should_continue_refining(retry_count: int) -> bool:
     """Return True if more refinement attempts are available."""
-    return retry_count < int(get_settings().max_retry_attempts)
+    configured_limit = get_settings().max_retry_attempts
+    limit = configured_limit if configured_limit > 0 else DEFAULT_MAX_RETRY_ATTEMPTS
+    return retry_count < limit

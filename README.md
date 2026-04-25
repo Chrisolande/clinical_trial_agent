@@ -33,7 +33,9 @@ flowchart TD
     SYN --> OUT[Report JSON + Text]
 ```
 
-See `docs/architecture.mermaid` for the maintained source diagram.
+See `docs/architecture.mermaid` for the maintained source diagram and
+`/home/runner/work/clinical_trial_agent/clinical_trial_agent/docs/architecture.md`
+for the refreshed runtime/security data-flow notes.
 
 ## Requirements
 
@@ -88,6 +90,7 @@ CTGOV_PROXY_URL=https://your-internal-proxy/ctgov/search
 - **QA fail-closed**: QA emits structured issues (`code`, `severity`, `message`) and blocks report generation on critical findings.
 - **Deterministic medication safety**: known contraindications and malformed medication inputs disqualify affected trials.
 - **Tenant/facility governance**: memory/audit/feedback access fails closed unless `TENANT_ID` and `FACILITY_ID` are explicitly configured (non-default, non-empty).
+- **CI fail-closed guardrails**: CI enforces `detect-secrets` baseline policy (`.secrets.baseline` verification filter) and runs secret scanning plus env hardening consistency checks for consent and tenant/facility defaults.
 
 
 ## CLI usage
@@ -119,7 +122,12 @@ make check
 
 `make check` runs linting, type-checking, tests, security checks, and complexity checks.
 
-Current repository coverage gate is **80%+**.
+Current repository coverage gate is **75%+**.
+
+Canonical developer flow (setup → validate-env → check → run) is documented in
+`/home/runner/work/clinical_trial_agent/clinical_trial_agent/docs/runbook.md`.
+Copy-paste CI debugging and incident response commands are in
+`/home/runner/work/clinical_trial_agent/clinical_trial_agent/docs/ops_playbook.md`.
 
 ## Dev container / Codespaces
 

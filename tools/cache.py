@@ -9,7 +9,7 @@ import asyncpg
 from diskcache import Cache
 from loguru import logger
 
-from config import get_settings
+from clinical_trial_agent.config import get_settings
 from tools.postgres_base import PostgresBase
 
 _cache = Cache(get_settings().cache_dir)

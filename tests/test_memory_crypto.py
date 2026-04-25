@@ -3,7 +3,7 @@ import json
 import pytest
 from cryptography.fernet import Fernet
 
-from memory import (
+from clinical_trial_agent.memory import (
     _deserialize_encrypted_json,
     _get_fernet_key,
     _get_profile_hash_salt,

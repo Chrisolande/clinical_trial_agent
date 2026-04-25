@@ -3,7 +3,7 @@ from typing import Any
 from agents import search_refiner, trial_search
 from loguru import logger
 
-from config import get_settings
+from clinical_trial_agent.config import get_settings
 
 from .state import RetrievalState
 

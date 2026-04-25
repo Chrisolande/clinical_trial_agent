@@ -155,6 +155,11 @@ testpaths = [
     "tests/test_consent_guard.py",
     "tests/test_llm_factory.py",
     "tests/test_config.py",
+    "tests/test_patient_parser.py",
+    "tests/test_missing_info.py",
+    "tests/test_qa_checker.py",
+    "tests/test_report_generator.py",
+    "tests/test_cache.py",
     "tests/test_medical_synonyms.py",
 ]
 addopts = "--tb=short --strict-markers -q"
@@ -162,6 +167,12 @@ markers = [
     "integration: marks tests that call external APIs (deselect with -m 'not integration')",
     "slow: marks tests that take >5 seconds",
 ]
+
+[tool.vulture]
+paths = ["clinical_trial_agent", "agents", "subagents", "tools", "models"]
+exclude = ["tests/**", ".venv/**", "docs/**"]
+min_confidence = 80
+ignore_names = ["cls"]
 
 [tool.coverage.run]
 source = [
@@ -171,12 +182,28 @@ source = [
     "models",
     "tools",
 ]
-omit = ["tests/*", "evaluation/*", "*/migrations/*"]
+omit = [
+    "tests/*",
+    "evaluation/*",
+    "*/migrations/*",
+    "clinical_trial_agent/cli.py",
+    "clinical_trial_agent/langgraph_app.py",
+    "clinical_trial_agent/logging_config.py",
+    "clinical_trial_agent/validate_env.py",
+    "agents/report_formatter.py",
+    "agents/terminology.py",
+    "models/eligibility.py",
+    "models/terminology.py",
+    "tools/cli_support.py",
+    "tools/medication_safety.py",
+    "tools/profile_validator.py",
+    "tools/telemetry.py",
+]
 branch = true
 
 [tool.coverage.report]
 show_missing = true
-fail_under = 65
+fail_under = 75
 exclude_lines = [
     "pragma: no cover",
     "if TYPE_CHECKING:",

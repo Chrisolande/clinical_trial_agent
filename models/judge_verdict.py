@@ -2,7 +2,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from config import TIER_ORDER
+from clinical_trial_agent.config import TIER_ORDER
 
 
 class JudgeVerdict(BaseModel):

@@ -1,7 +1,7 @@
 import pytest
 from tools.errors import ClinicalTrialsClientError
 
-import clinical_trials
+import clinical_trial_agent.clinical_trials as clinical_trials
 
 
 @pytest.mark.asyncio
@@ -106,7 +106,18 @@ async def test_request_helper_uses_urllib_fallback_on_403(monkeypatch: pytest.Mo
     monkeypatch.setattr(
         clinical_trials,
         "get_settings",
-        lambda: type("S", (), {"ctgov_retry_attempts": 1, "ctgov_retry_backoff_base": 2.0})(),
+        lambda: type(
+            "S",
+            (),
+            {
+                "ctgov_retry_attempts": 1,
+                "ctgov_retry_backoff_base": 2.0,
+                "ctgov_user_agent": "test-agent",
+                "ctgov_accept": "application/json",
+                "ctgov_proxy_url": "",
+                "ctgov_transport_mode": "get",
+            },
+        )(),
     )
     monkeypatch.setattr(
         clinical_trials,

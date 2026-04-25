@@ -1,6 +1,6 @@
 import pytest
 
-from config import Settings, get_settings
+from clinical_trial_agent.config import Settings, get_settings
 
 
 def test_settings_provider_normalization() -> None:

@@ -8,7 +8,7 @@ from prompts.synthesis import build_synthesis_prompt
 from pydantic import BaseModel, Field
 from tools.retry import llm_retry
 
-from config import get_llm, get_settings
+from clinical_trial_agent.config import get_llm, get_settings
 
 
 class ExecutiveSummaryModel(BaseModel):

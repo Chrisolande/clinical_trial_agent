@@ -6,7 +6,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from prompts.eligibility import build_eligibility_prompt
 from tools.sanitizer import sanitize_patient_profile
 
-from config import external_llm_requires_consent
+from clinical_trial_agent.config import external_llm_requires_consent
 
 
 def _has_consent() -> bool:
@@ -16,6 +16,24 @@ def _has_consent() -> bool:
 def _assert_external_llm_consent() -> None:
     if external_llm_requires_consent() and not _has_consent():
         raise RuntimeError("CLINICAL_DATA_EXTERNAL_LLM_CONSENT=true required for external LLMs.")
+
+
+def _is_empty_value(value: Any) -> bool:
+    return value in (None, "", [])
+
+
+def _sanitize_or_redact(value: Any) -> str:
+    text = "; ".join(str(v) for v in value) if isinstance(value, (list, tuple)) else str(value)
+    return sanitize_patient_profile(text).text or "[redacted]"
+
+
+def _format_pii_value(key: str, value: Any, consent_active: bool) -> str:
+    if not consent_active:
+        return "[redacted]"
+    if key == "age" and isinstance(value, (int, float)):
+        base = int(value) // 10 * 10
+        return f"age_range: {base}-{base + 9}"
+    return _sanitize_or_redact(value)
 
 
 def format_patient_summary(profile: dict[str, Any]) -> str:
@@ -32,25 +50,11 @@ def format_patient_summary(profile: dict[str, Any]) -> str:
     lines = []
 
     for key, val in profile.items():
-        if val in (None, "", []):
+        if _is_empty_value(val):
             continue
 
-        if key not in pii_fields:
-            lines.append(f"{key}: {val}")
-            continue
-
-        if not consent_active:
-            lines.append(f"{key}: [redacted]")
-            continue
-
-        if key == "age" and isinstance(val, (int, float)):
-            base = int(val) // 10 * 10
-            content = f"age_range: {base}-{base + 9}"
-        else:
-            text = "; ".join(str(v) for v in val) if isinstance(val, (list, tuple)) else str(val)
-            content = sanitize_patient_profile(text).text
-
-        lines.append(f"{key}: {content}" if content else f"{key}: [redacted]")
+        content = str(val) if key not in pii_fields else _format_pii_value(key, val, consent_active)
+        lines.append(f"{key}: {content}")
 
     return "\n".join(lines)
 

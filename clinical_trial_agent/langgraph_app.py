@@ -5,6 +5,7 @@ from langgraph.graph import END, START, StateGraph
 from subagents.eligibility.graph import _build_eligibility_graph
 from subagents.retrieval.graph import _build_retrieval_graph
 from subagents.synthesis.graph import _build_synthesis_graph
+from tools.telemetry import trace_span
 
 from clinical_trial_agent.config import get_settings
 
@@ -36,6 +37,35 @@ def _require_dict(value: Any, *, source: str) -> dict[str, Any]:
     raise TypeError(f"{source} must return dict, got {type(value)!r}")
 
 
+def _normalize_retrieval_result(value: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **value,
+        "trials_raw": list(value.get("trials_raw", [])),
+        "trials_deduplicated": list(value.get("trials_deduplicated", [])),
+        "search_queries": list(value.get("search_queries", [])),
+    }
+
+
+def _normalize_eligibility_result(value: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **value,
+        "trial_scores": list(value.get("trial_scores", [])),
+        "decision_history": list(value.get("decision_history", [])),
+        "missing_info_recommendations": list(value.get("missing_info_recommendations", [])),
+        "retrieval_needs_broadening": bool(value.get("retrieval_needs_broadening", False)),
+    }
+
+
+def _normalize_output_contract(value: dict[str, Any]) -> dict[str, Any]:
+    report_json = value.get("report_json")
+    report_text = value.get("report_text")
+    return {
+        **value,
+        "report_json": report_json if isinstance(report_json, dict) else None,
+        "report_text": report_text if isinstance(report_text, str) else None,
+    }
+
+
 def _thread_id(state: EndToEndState, stage: str) -> str:
     base = state.get("thread_id") or "langgraph-dev-thread"
     retry = int(state.get("retry_count", 0))
@@ -59,8 +89,18 @@ async def run_retrieval_node(state: EndToEndState) -> dict[str, Any]:
         "trials_raw": [],
     }
     config: RunnableConfig = {"configurable": {"thread_id": _thread_id(state, "retrieval")}}
-    result = await COMPILED_RETRIEVAL.ainvoke(retrieval_input, config=config)
-    return {"retrieval_result": _require_dict(result, source="retrieval subgraph")}
+    with trace_span(
+        "langgraph.run_retrieval",
+        run_id=state.get("thread_id") or "langgraph-dev-thread",
+        attempt=int(state.get("retry_count", 0)),
+        slo_ms=6000,
+    ):
+        result = await COMPILED_RETRIEVAL.ainvoke(retrieval_input, config=config)
+    return {
+        "retrieval_result": _normalize_retrieval_result(
+            _require_dict(result, source="retrieval subgraph")
+        )
+    }
 
 
 async def run_eligibility_node(state: EndToEndState) -> dict[str, Any]:
@@ -74,8 +114,19 @@ async def run_eligibility_node(state: EndToEndState) -> dict[str, Any]:
         "eligibility_verdicts": None,
     }
     config: RunnableConfig = {"configurable": {"thread_id": _thread_id(state, "eligibility")}}
-    result = await COMPILED_ELIGIBILITY.ainvoke(eligibility_input, config=config)
-    return {"eligibility_result": _require_dict(result, source="eligibility subgraph")}
+    with trace_span(
+        "langgraph.run_eligibility",
+        run_id=state.get("thread_id") or "langgraph-dev-thread",
+        attempt=int(state.get("retry_count", 0)),
+        trial_count=len(limited_trials),
+        slo_ms=12000,
+    ):
+        result = await COMPILED_ELIGIBILITY.ainvoke(eligibility_input, config=config)
+    return {
+        "eligibility_result": _normalize_eligibility_result(
+            _require_dict(result, source="eligibility subgraph")
+        )
+    }
 
 
 def route_after_eligibility(
@@ -86,7 +137,9 @@ def route_after_eligibility(
     eligibility_result = state.get("eligibility_result") or {}
     should_retry = bool(eligibility_result.get("retrieval_needs_broadening", False))
     retry_count = int(state.get("retry_count", 0))
-    if should_retry and retry_count < get_settings().max_retry_attempts:
+    # retry_count is the attempt index (0=initial attempt, 1=first retry, ...).
+    max_retries = max(0, int(get_settings().max_retry_attempts))
+    if should_retry and retry_count < max_retries:
         return "retry_retrieval"
     return "run_synthesis"
 
@@ -110,14 +163,20 @@ async def run_synthesis_node(state: EndToEndState) -> dict[str, Any]:
         "trials_with_criteria": eligibility_result.get("trials_with_criteria"),
     }
     config: RunnableConfig = {"configurable": {"thread_id": _thread_id(state, "synthesis")}}
-    result = _require_dict(
-        await COMPILED_SYNTHESIS.ainvoke(synthesis_input, config=config),
-        source="synthesis subgraph",
-    )
+    with trace_span(
+        "langgraph.run_synthesis",
+        run_id=state.get("thread_id") or "langgraph-dev-thread",
+        slo_ms=6000,
+    ):
+        result = _require_dict(
+            await COMPILED_SYNTHESIS.ainvoke(synthesis_input, config=config),
+            source="synthesis subgraph",
+        )
+    normalized = _normalize_output_contract(result)
     return {
-        "synthesis_result": result,
-        "report_json": result.get("report_json"),
-        "report_text": result.get("report_text"),
+        "synthesis_result": normalized,
+        "report_json": normalized.get("report_json"),
+        "report_text": normalized.get("report_text"),
     }
 
 

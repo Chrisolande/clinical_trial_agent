@@ -3,7 +3,7 @@ from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
-from config import bootstrap_environment
+from clinical_trial_agent.config import bootstrap_environment
 
 from .nodes import (
     aggregate_results,

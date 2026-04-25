@@ -52,9 +52,7 @@ async def test_fanout_dispatch_and_helpers() -> None:
     assert set(merged.keys()) == {"A", "B"}
 
 
-def test_cached_irrelevant_normalize_collect_and_ranking(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_cached_and_irrelevant_worker_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(nodes, "get_cached_eligibility_verdict", lambda *_: {"trial_id": "N1"})
     cached = nodes._cached_worker_result({"nct_id": "N1"}, "N1", "h")
     assert cached is not None
@@ -72,6 +70,8 @@ def test_cached_irrelevant_normalize_collect_and_ranking(
 
     assert nodes._irrelevant_worker_result({"nct_id": "N4"}, "N4", "") is None
 
+
+def test_normalize_and_collect_criteria_helpers() -> None:
     normalized = nodes._normalize_criteria([{"text": "A"}, "B"], "inclusion")
     assert normalized[1]["criteria_type"] == "inclusion"
 
@@ -83,6 +83,8 @@ def test_cached_irrelevant_normalize_collect_and_ranking(
     empty = nodes._empty_criteria_worker_result({"trial": {"nct_id": "N5"}}, "N5")
     assert empty["processed_verdicts"][0]["match_tier"] == "weak"
 
+
+def test_collect_verdicts_and_build_scored_trial() -> None:
     lookup = nodes._build_trial_lookup(
         [{"trial": {"nct_id": "N1", "brief_title": "Trial"}}, {"trial": {}}]
     )
@@ -116,6 +118,8 @@ def test_cached_irrelevant_normalize_collect_and_ranking(
     )
     assert scored_trial["trial_id"] == "N1"
 
+
+def test_rank_trials_and_count_viable() -> None:
     ranked = nodes._rank_trials(
         [
             {"trial_id": "A", "tier": "weak", "score": 0.9},

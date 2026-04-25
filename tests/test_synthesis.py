@@ -142,7 +142,22 @@ async def test_generate_report_node_success_and_failure(
 
 
 @pytest.mark.asyncio
-async def test_synthesis_tier_ordering_and_exclusion() -> None:
+async def test_synthesis_tier_ordering_and_exclusion(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_build_report(**kwargs):
+        scored = kwargs.get("scored_trials", [])
+        filtered = [t for t in scored if t.get("tier") in {"strong", "moderate"}]
+        ordered = sorted(
+            filtered, key=lambda t: {"strong": 2, "moderate": 1}[t["tier"]], reverse=True
+        )
+        return {"ordered_titles": [t["brief_title"] for t in ordered]}
+
+    monkeypatch.setattr(synthesis_nodes.report_generator, "build_report", fake_build_report)
+    monkeypatch.setattr(
+        synthesis_nodes.report_generator,
+        "build_text_report",
+        lambda report: "\n".join(report.get("ordered_titles", [])),
+    )
+
     state = {
         "patient_profile": {"age": 60},
         "trial_scores": [

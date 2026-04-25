@@ -8,7 +8,7 @@ from models.terminology import NormalisedTerminology
 from prompts.terminology import build_terminology_prompt
 from tools.retry import llm_retry
 
-from config import get_llm
+from clinical_trial_agent.config import get_llm
 
 _chain = ChatPromptTemplate.from_template(
     build_terminology_prompt()

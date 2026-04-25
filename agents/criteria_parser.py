@@ -9,7 +9,7 @@ from prompts.criteria_parser import build_criteria_parser_prompt
 from tools import cache
 from tools.retry import llm_retry
 
-from config import get_llm, get_settings
+from clinical_trial_agent.config import get_llm, get_settings
 
 CriterionCategoryLiteral = Literal[
     "age", "lab", "biomarker", "diagnosis", "medication", "performance", "other"

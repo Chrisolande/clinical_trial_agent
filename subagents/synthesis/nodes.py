@@ -3,7 +3,7 @@ from typing import Any, Literal
 from agents import qa_checker, report_generator
 from loguru import logger
 
-from config import TIER_ORDER
+from clinical_trial_agent.config import TIER_ORDER
 
 from .state import QAIssue, SynthesisState
 
