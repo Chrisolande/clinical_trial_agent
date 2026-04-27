@@ -1,7 +1,6 @@
 """Missing information identification node."""
 
 import asyncio
-import os
 from typing import Any
 
 from langchain_core.prompts import (
@@ -13,18 +12,8 @@ from loguru import logger
 from models.missing_info import CompletenessAssessmentList
 from prompts.missinginfo import build_missing_info_human_prompt, build_missing_info_system_prompt
 
-from clinical_trial_agent.config import external_llm_requires_consent, get_llm, get_settings
-
-
-def _assert_external_llm_consent() -> None:
-    if not external_llm_requires_consent():
-        return
-    consent = os.environ.get("CLINICAL_DATA_EXTERNAL_LLM_CONSENT", "false").strip().lower()
-    if consent != "true":
-        raise RuntimeError(
-            "CLINICAL_DATA_EXTERNAL_LLM_CONSENT=true is required before sending patient data to external LLMs."
-        )
-
+from agents.consent import assert_external_llm_consent
+from clinical_trial_agent.config import get_llm, get_settings
 
 _PROMPT: ChatPromptTemplate = ChatPromptTemplate.from_messages(
     [
@@ -84,7 +73,7 @@ async def _invoke_missing_info_llm(
     uncertain_summary: str,
 ) -> CompletenessAssessmentList:
     """Invoke the missing-info chain. Timeout is delegated to RunnableConfig."""
-    _assert_external_llm_consent()
+    assert_external_llm_consent()
     result = await _get_chain().ainvoke(
         {
             "patient_profile": _format_profile_summary(patient_profile),

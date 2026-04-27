@@ -80,13 +80,19 @@ def _empty_criteria_worker_result(
         "critical_missing_info": ["No parsed criteria available."],
         "key_concern": "No assessable criteria parsed",
         "rationale": "Eligibility criteria could not be parsed.",
+        **_base_verdict_counts(),
+    }
+    return _worker_result(trial_with_criteria, verdict_data)
+
+
+def _base_verdict_counts() -> dict[str, Any]:
+    return {
         "verdicts": [],
         "meets_count": 0,
         "fails_count": 0,
         "uncertain_count": 0,
         "hard_exclusion_failures": 0,
     }
-    return _worker_result(trial_with_criteria, verdict_data)
 
 
 def _merge_eligibility_verdicts(

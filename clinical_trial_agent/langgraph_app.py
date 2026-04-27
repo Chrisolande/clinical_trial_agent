@@ -8,6 +8,12 @@ from subagents.synthesis.graph import _build_synthesis_graph
 from tools.telemetry import trace_span
 
 from clinical_trial_agent.config import get_settings
+from clinical_trial_agent.normalizers import (
+    _normalize_eligibility_result,
+    _normalize_retrieval_result,
+    _normalize_supervisor_output,
+    _require_dict,
+)
 
 
 class EndToEndInput(TypedDict):
@@ -31,36 +37,12 @@ class EndToEndOutput(TypedDict):
     report_text: str | None
 
 
-def _require_dict(value: Any, *, source: str) -> dict[str, Any]:
-    if isinstance(value, dict):
-        return value
-    raise TypeError(f"{source} must return dict, got {type(value)!r}")
-
-
-def _normalize_retrieval_result(value: dict[str, Any]) -> dict[str, Any]:
-    return {
-        **value,
-        "trials_raw": list(value.get("trials_raw", [])),
-        "trials_deduplicated": list(value.get("trials_deduplicated", [])),
-        "search_queries": list(value.get("search_queries", [])),
-    }
-
-
-def _normalize_eligibility_result(value: dict[str, Any]) -> dict[str, Any]:
-    return {
-        **value,
-        "trial_scores": list(value.get("trial_scores", [])),
-        "decision_history": list(value.get("decision_history", [])),
-        "missing_info_recommendations": list(value.get("missing_info_recommendations", [])),
-        "retrieval_needs_broadening": bool(value.get("retrieval_needs_broadening", False)),
-    }
-
-
 def _normalize_output_contract(value: dict[str, Any]) -> dict[str, Any]:
+    normalized = _normalize_supervisor_output(value)
     report_json = value.get("report_json")
     report_text = value.get("report_text")
     return {
-        **value,
+        **normalized,
         "report_json": report_json if isinstance(report_json, dict) else None,
         "report_text": report_text if isinstance(report_text, str) else None,
     }

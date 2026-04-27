@@ -1,4 +1,3 @@
-import os
 from typing import Any
 
 from langchain_core.prompts import ChatPromptTemplate
@@ -8,17 +7,8 @@ from prompts.patient_extraction import build_patient_extraction_prompt
 from tools.retry import llm_retry
 from tools.sanitizer import sanitize_patient_profile
 
-from clinical_trial_agent.config import external_llm_requires_consent, get_llm
-
-
-def _assert_external_llm_consent() -> None:
-    if not external_llm_requires_consent():
-        return
-    consent = os.environ.get("CLINICAL_DATA_EXTERNAL_LLM_CONSENT", "false").strip().lower()
-    if consent != "true":
-        raise RuntimeError(
-            "CLINICAL_DATA_EXTERNAL_LLM_CONSENT=true is required before sending patient data to external LLMs."
-        )
+from agents.consent import assert_external_llm_consent
+from clinical_trial_agent.config import get_llm
 
 
 def _get_chain() -> Any:
@@ -28,7 +18,7 @@ def _get_chain() -> Any:
 
 @llm_retry
 async def _invoke_patient_parser_llm(raw_text: str) -> ExtractedPatientProfile:
-    _assert_external_llm_consent()
+    assert_external_llm_consent()
     result = await _get_chain().ainvoke(
         {"clinical_text": raw_text},
         config={"run_name": "patient_parse", "tags": ["supervisor", "parse"]},
