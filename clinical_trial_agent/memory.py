@@ -156,12 +156,6 @@ class EpisodicMemory(MemoryAuditFeedbackMixin, PostgresBase):
             await conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_physician_feedback_tenant_facility ON physician_feedback (tenant_id, facility_id, created_at DESC)"
             )
-            await conn.execute("ALTER TABLE llm_cache ADD COLUMN IF NOT EXISTS prefix TEXT")
-            await conn.execute("UPDATE llm_cache SET prefix = '' WHERE prefix IS NULL")
-            await conn.execute("ALTER TABLE llm_cache ALTER COLUMN prefix SET NOT NULL")
-            await conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_llm_cache_prefix ON llm_cache (prefix)"
-            )
             row = await conn.fetchrow("SELECT version FROM schema_version LIMIT 1")
             current_version = int(row["version"]) if row and "version" in row else 0
 

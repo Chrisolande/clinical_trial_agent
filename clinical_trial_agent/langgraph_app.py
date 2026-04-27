@@ -39,8 +39,8 @@ class EndToEndOutput(TypedDict):
 
 def _normalize_output_contract(value: dict[str, Any]) -> dict[str, Any]:
     normalized = _normalize_supervisor_output(value)
-    report_json = value.get("report_json")
-    report_text = value.get("report_text")
+    report_json = normalized.get("report_json")
+    report_text = normalized.get("report_text")
     return {
         **normalized,
         "report_json": report_json if isinstance(report_json, dict) else None,
@@ -142,6 +142,9 @@ async def run_synthesis_node(state: EndToEndState) -> dict[str, Any]:
         "trials_raw": list(retrieval_result.get("trials_raw", [])),
         "search_queries": list(retrieval_result.get("search_queries", [])),
         "decision_history": list(eligibility_result.get("decision_history", [])),
+        "retrieval_errors": list(
+            retrieval_result.get("retrieval_errors", retrieval_result.get("errors", []))
+        ),
         "trials_with_criteria": eligibility_result.get("trials_with_criteria"),
     }
     config: RunnableConfig = {"configurable": {"thread_id": _thread_id(state, "synthesis")}}

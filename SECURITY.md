@@ -102,7 +102,7 @@ The following checks run in CI:
 - **pytest-cov** - test coverage, fail threshold at 75%
 
 The canonical local/CI command flow is documented in
-`/home/runner/work/clinical_trial_agent/clinical_trial_agent/docs/runbook.md`.
+`docs/runbook.md`.
 
 Run `python validate_env.py` locally before deployment to confirm all required secrets are present and the database is reachable.
 

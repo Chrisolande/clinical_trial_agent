@@ -20,6 +20,7 @@ class SynthesisInput(TypedDict):
     trials_raw: list[dict[str, Any]]  # for report context
     search_queries: list[str]  # for report methodology
     decision_history: list[str]  # full history (for report, read-only)
+    retrieval_errors: list[str] | None
     trials_with_criteria: list[dict[str, Any]] | None
 
 
@@ -46,6 +47,7 @@ class SynthesisState(TypedDict):
     trials_raw: list[dict[str, Any]]
     search_queries: list[str]
     decision_history: list[str]  # full history (read-only internally)
+    retrieval_errors: list[str] | None
     trials_with_criteria: list[dict[str, Any]] | None
 
     # Internal state

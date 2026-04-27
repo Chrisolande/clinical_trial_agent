@@ -96,12 +96,16 @@ async def assess_and_finalize(state: RetrievalState) -> dict[str, Any]:
         f"Retrieval complete: {len(new_trials)} new unique trials "
         f"(fetched: {len(fetched)}, within-batch dupes: {len(fetched) - len(new_trials)})."
     )
+    retrieval_errors = list(state.get("internal_errors") or [])
+    retrieval_failed = bool(retrieval_errors) and not bool(new_trials)
     return {
         "trials_raw": new_trials,
         "trials_deduplicated": new_trials,
         "search_queries": list(state.get("executed_query_strings") or []),
         "decision_history": decisions,
-        "errors": list(state.get("internal_errors") or []),
+        "retrieval_failed": retrieval_failed,
+        "retrieval_errors": retrieval_errors,
+        "errors": retrieval_errors,
     }
 
 

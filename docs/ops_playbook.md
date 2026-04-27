@@ -3,7 +3,7 @@
 ## CI debugging
 
 ```bash
-cd /home/runner/work/clinical_trial_agent/clinical_trial_agent
+cd .
 uv sync --locked --dev
 uv run make check
 uv run pytest --cov --cov-report=term --cov-fail-under=75

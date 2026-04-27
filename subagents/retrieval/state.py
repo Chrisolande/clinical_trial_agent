@@ -14,6 +14,8 @@ class RetrievalOutput(TypedDict):
     trials_deduplicated: list[dict[str, Any]]
     search_queries: list[str]
     decision_history: list[str]
+    retrieval_failed: bool
+    retrieval_errors: list[str]
     errors: list[str]
 
 
@@ -35,4 +37,6 @@ class RetrievalState(TypedDict):
     trials_deduplicated: list[dict[str, Any]]  # full deduped list
     search_queries: list[str]
     decision_history: list[str]
+    retrieval_failed: bool
+    retrieval_errors: list[str]
     errors: list[str]

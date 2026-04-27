@@ -46,6 +46,7 @@ async def run_qa_check(state: SynthesisState) -> dict[str, Any]:
             patient_profile=state.get("patient_profile") or {},
             eligibility_verdicts=state.get("eligibility_verdicts") or {},
             scored_trials=state.get("trial_scores") or [],
+            retrieval_errors=list(state.get("retrieval_errors") or []),
         )
         qa_passed = result.get("qa_passed", True)
         issues = _normalize_qa_issues(result.get("qa_issues", []))
@@ -134,6 +135,7 @@ def _collect_synthesis_inputs(state: SynthesisState) -> dict[str, Any]:
             + list(state.get("new_decision_entries") or [])
         ),
         "qa_issues": _normalize_qa_issues(state.get("qa_issues") or []),
+        "retrieval_errors": list(state.get("retrieval_errors") or []),
     }
 
 

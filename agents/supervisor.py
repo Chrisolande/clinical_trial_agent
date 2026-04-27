@@ -162,6 +162,7 @@ class SupervisorOrchestrator:
         trials_raw: list[dict[str, Any]],
         search_queries: list[str],
         decision_history: list[str],
+        retrieval_errors: list[str] | None = None,
         trials_with_criteria: list[dict[str, Any]] | None = None,
         thread_id: str | None = None,
     ) -> dict[str, Any]:
@@ -174,6 +175,7 @@ class SupervisorOrchestrator:
             "trials_raw": trials_raw,
             "search_queries": search_queries,
             "decision_history": decision_history,
+            "retrieval_errors": list(retrieval_errors or []),
             "trials_with_criteria": trials_with_criteria,
         }
         config: RunnableConfig | None = None
@@ -314,18 +316,25 @@ class SupervisorOrchestrator:
         adjusted_scores = _apply_feedback_adjustments(run_state.scored_trials, feedback_rows)
 
         with trace_span("supervisor.run_synthesis", run_id=thread_id, slo_ms=6000):
-            synthesis = await self.run_synthesis(
-                patient_profile=patient_profile,
-                trial_scores=adjusted_scores,
-                eligibility_verdicts=eligibility.get("eligibility_verdicts"),
-                missing_info_recommendations=eligibility.get("missing_info_recommendations"),
-                trials_raw=list(run_state.retrieval_result.get("trials_raw", [])),
-                search_queries=list(run_state.retrieval_result.get("search_queries", [])),
-                decision_history=self._compress_decision_history(
+            synthesis_kwargs: dict[str, Any] = {
+                "patient_profile": patient_profile,
+                "trial_scores": adjusted_scores,
+                "eligibility_verdicts": eligibility.get("eligibility_verdicts"),
+                "missing_info_recommendations": eligibility.get("missing_info_recommendations"),
+                "trials_raw": list(run_state.retrieval_result.get("trials_raw", [])),
+                "search_queries": list(run_state.retrieval_result.get("search_queries", [])),
+                "decision_history": self._compress_decision_history(
                     list(eligibility.get("decision_history", []))
                 ),
-                trials_with_criteria=eligibility.get("trials_with_criteria"),
-                thread_id=thread_id,
+                "trials_with_criteria": eligibility.get("trials_with_criteria"),
+                "thread_id": thread_id,
+            }
+            if "retrieval_errors" in inspect.signature(self.run_synthesis).parameters:
+                synthesis_kwargs["retrieval_errors"] = list(
+                    run_state.retrieval_result.get("retrieval_errors", [])
+                )
+            synthesis = await self.run_synthesis(
+                **synthesis_kwargs,
             )
         run_state.final_result = self._unwrap_synthesis_result(synthesis)
         return _normalize_supervisor_output(run_state.final_result)
@@ -441,6 +450,10 @@ class SupervisorOrchestrator:
             "trials_deduplicated": deduped,
             "trials_raw": raw,
             "search_queries": list(retrieval.get("search_queries", [])),
+            "retrieval_failed": bool(retrieval.get("retrieval_failed", False)),
+            "retrieval_errors": list(
+                retrieval.get("retrieval_errors", retrieval.get("errors", []))
+            ),
         }
 
     @staticmethod

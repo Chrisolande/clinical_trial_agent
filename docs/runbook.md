@@ -5,7 +5,7 @@ This is the single copy-paste flow for local development and CI parity.
 ## 1) Setup
 
 ```bash
-cd /home/runner/work/clinical_trial_agent/clinical_trial_agent
+cd .
 uv sync --locked --dev
 ```
 

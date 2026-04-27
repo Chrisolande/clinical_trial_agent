@@ -9,11 +9,15 @@ def _require_dict(value: Any, *, source: str) -> dict[str, Any]:
 
 
 def _normalize_retrieval_result(value: dict[str, Any]) -> dict[str, Any]:
+    retrieval_errors = list(value.get("retrieval_errors", value.get("errors", [])))
     return {
         **value,
         "trials_raw": list(value.get("trials_raw", [])),
         "trials_deduplicated": list(value.get("trials_deduplicated", [])),
         "search_queries": list(value.get("search_queries", [])),
+        "retrieval_errors": retrieval_errors,
+        "retrieval_failed": bool(value.get("retrieval_failed", bool(retrieval_errors))),
+        "errors": retrieval_errors,
     }
 
 

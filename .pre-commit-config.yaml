@@ -42,4 +42,4 @@ repos:
         entry: vulture
         language: system
         pass_filenames: false
-        files: ^clinical_trial_agent/
+        files: ^(clinical_trial_agent|agents|subagents|tools|models)/

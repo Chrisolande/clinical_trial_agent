@@ -34,7 +34,7 @@ flowchart TD
 ```
 
 See `docs/architecture.mermaid` for the maintained source diagram and
-`/home/runner/work/clinical_trial_agent/clinical_trial_agent/docs/architecture.md`
+`docs/architecture.md`
 for the refreshed runtime/security data-flow notes.
 
 ## Requirements
@@ -125,9 +125,9 @@ make check
 Current repository coverage gate is **75%+**.
 
 Canonical developer flow (setup → validate-env → check → run) is documented in
-`/home/runner/work/clinical_trial_agent/clinical_trial_agent/docs/runbook.md`.
+`docs/runbook.md`.
 Copy-paste CI debugging and incident response commands are in
-`/home/runner/work/clinical_trial_agent/clinical_trial_agent/docs/ops_playbook.md`.
+`docs/ops_playbook.md`.
 
 ## Dev container / Codespaces
 
