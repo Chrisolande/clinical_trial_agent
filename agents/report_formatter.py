@@ -1,5 +1,83 @@
+import re
 from collections import defaultdict
 from typing import Any
+
+_LOW_VALUE_PLACEHOLDERS = {
+    "criterion requires details not present in profile",
+    "missing trial-specific clinical detail",
+    "missing exclusion-history detail",
+    "additional clinical detail",
+    "n/a",
+    "unknown",
+}
+_NOT_APPLICABLE_MARKERS = {"not_applicable", "not applicable", "n/a", "non-applicable"}
+
+
+def _is_low_value_placeholder(field: str, desc: str) -> bool:
+    field_norm = field.strip().lower()
+    desc_norm = desc.strip().lower()
+    if not field_norm and not desc_norm:
+        return True
+    if field_norm in _LOW_VALUE_PLACEHOLDERS:
+        return True
+    if desc_norm in _LOW_VALUE_PLACEHOLDERS:
+        return True
+    return bool(field_norm and field_norm == desc_norm and field_norm in _LOW_VALUE_PLACEHOLDERS)
+
+
+def _is_not_applicable_item(item: dict[str, Any]) -> bool:
+    blob = " ".join(
+        [
+            str(item.get("field_id", "")),
+            str(item.get("field", "")),
+            str(item.get("display_name", "")),
+            str(item.get("description", "")),
+            str(item.get("why_needed", "")),
+            str(item.get("category", "")),
+        ]
+    ).lower()
+    return any(marker in blob for marker in _NOT_APPLICABLE_MARKERS)
+
+
+def _dedupe_info_gaps(info_gaps: list[Any]) -> list[dict[str, Any]]:
+    deduped: dict[str, dict[str, Any]] = {}
+    for item in info_gaps:
+        if not isinstance(item, dict):
+            continue
+        if _is_not_applicable_item(item):
+            continue
+        field_id = str(item.get("field_id", "")).strip().lower()
+        field = str(item.get("field", "")).strip()
+        desc = str(item.get("description", "")).strip()
+        if _is_low_value_placeholder(field, desc):
+            continue
+        key = field_id or f"{field.lower()}::{desc.lower()}"
+        if key in deduped:
+            existing = deduped[key]
+            merged_ids = set(existing.get("affected_trial_ids", [])) | set(
+                item.get("affected_trial_ids", [])
+            )
+            existing["affected_trial_ids"] = sorted(merged_ids)
+            if len(desc) > len(str(existing.get("description", ""))):
+                existing["description"] = desc
+            continue
+        deduped[key] = dict(item)
+    return list(deduped.values())
+
+
+def _compact_executive_summary(summary: str) -> str:
+    text = str(summary or "").strip()
+    if not text:
+        return ""
+    bullet_lines = [
+        line.strip("-• ").strip()
+        for line in text.splitlines()
+        if line.strip().startswith(("-", "•"))
+    ]
+    if bullet_lines:
+        return " ".join(f"- {line}" for line in bullet_lines[:3])
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+    return " ".join(sentences[:3]) if sentences else text
 
 
 def render_trial_entry(t: dict[str, Any], *, include_key_concern: bool) -> list[str]:
@@ -33,10 +111,11 @@ def render_tier_section(
 
 
 def render_information_gaps(info_gaps: list[dict[str, Any]]) -> list[str]:
-    if not info_gaps:
+    cleaned = _dedupe_info_gaps(info_gaps)
+    if not cleaned:
         return []
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for item in info_gaps:
+    for item in cleaned:
         grouped[str(item.get("priority", "medium")).upper()].append(item)
 
     lines = ["INFORMATION GAPS", "-" * 40]
@@ -46,8 +125,12 @@ def render_information_gaps(info_gaps: list[dict[str, Any]]) -> list[str]:
             continue
         lines.append(f"{severity}:")
         for item in items:
-            field = str(item.get("field", "")).strip()
+            field = str(
+                item.get("field") or item.get("display_name") or item.get("field_id") or ""
+            ).strip()
             desc = str(item.get("description", "")).strip()
+            if not field and not desc:
+                continue
             lines.append(f"- {field}")
             if desc and desc != field:
                 lines.append(f"  {desc}")
@@ -56,11 +139,12 @@ def render_information_gaps(info_gaps: list[dict[str, Any]]) -> list[str]:
 
 
 def render_next_actions(info_gaps: list[dict[str, Any]]) -> list[str]:
-    if not info_gaps:
+    cleaned = _dedupe_info_gaps(info_gaps)
+    if not cleaned:
         return []
-    lines = ["RECOMMENDED CLINICAL NEXT ACTIONS", "-" * 40]
+    action_lines: list[str] = []
     high_then_medium = [
-        g for g in info_gaps if str(g.get("priority", "")).lower() in {"high", "medium"}
+        g for g in cleaned if str(g.get("priority", "")).lower() in {"high", "medium"}
     ]
     high_then_medium = [
         g
@@ -72,16 +156,22 @@ def render_next_actions(info_gaps: list[dict[str, Any]]) -> list[str]:
             "missing exclusion-history detail",
         }
     ]
-    for item in high_then_medium[:8]:
-        field = str(item.get("field", "")).strip()
+    for item in high_then_medium[:5]:
+        field = str(
+            item.get("field") or item.get("display_name") or item.get("field_id") or ""
+        ).strip()
         desc = str(item.get("description", "")).strip()
         trials = ", ".join(list(item.get("affected_trial_ids", []))[:3])
-        lines.append(f"- {field}")
+        if _is_low_value_placeholder(field, desc):
+            continue
+        action_lines.append(f"- {field}")
         if desc:
-            lines.append(f"  Action: {desc}")
+            action_lines.append(f"  Action: {desc}")
         if trials:
-            lines.append(f"  Affects trials: {trials}")
-    lines.append("")
+            action_lines.append(f"  Affects trials: {trials}")
+    if not action_lines:
+        return []
+    lines = ["RECOMMENDED CLINICAL NEXT ACTIONS", "-" * 40, *action_lines, ""]
     return lines
 
 
@@ -138,7 +228,7 @@ def build_text_report(report_json: dict[str, Any]) -> str:
         "",
         "EXECUTIVE SUMMARY",
         "-" * 40,
-        report_json.get("executive_summary", ""),
+        _compact_executive_summary(str(report_json.get("executive_summary", ""))),
         "",
         f"TRIALS SEARCHED: {report_json.get('total_trials_searched', 0)}  "
         f"EVALUATED: {report_json.get('total_trials_evaluated', 0)}",
@@ -172,6 +262,7 @@ def build_text_report(report_json: dict[str, Any]) -> str:
 
     raw_gaps = report_json.get("information_gaps", [])
     gaps = [g for g in raw_gaps if isinstance(g, dict)] if isinstance(raw_gaps, list) else []
+    gaps = _dedupe_info_gaps(gaps)
     lines.extend(render_information_gaps(gaps))
     lines.extend(render_next_actions(gaps))
 
@@ -187,6 +278,33 @@ def build_text_report(report_json: dict[str, Any]) -> str:
             else:
                 lines.append(f"  - {issue}")
         lines.append("")
+
+    qa_remediation = report_json.get("qa_remediation", {})
+    if isinstance(qa_remediation, dict):
+        attempts = int(qa_remediation.get("attempts", 0))
+        actions = qa_remediation.get("actions", [])
+        unresolved = qa_remediation.get("unresolved_issues", [])
+        if attempts > 0 or unresolved:
+            lines += ["QA REMEDIATION", "-" * 40]
+            lines.append(f"Attempts: {attempts}")
+            if isinstance(actions, list) and actions:
+                lines.append(
+                    "Actions: "
+                    + ", ".join(
+                        str(action.get("action", ""))
+                        for action in actions
+                        if isinstance(action, dict)
+                    )
+                )
+            if isinstance(unresolved, list) and unresolved:
+                lines.append("Unresolved critical issues:")
+                for issue in unresolved:
+                    if isinstance(issue, dict):
+                        lines.append(
+                            f"  - [{str(issue.get('severity', 'unknown')).upper()}] "
+                            f"{issue.get('code', 'UNSPECIFIED')}: {issue.get('message', '')}"
+                        )
+            lines.append("")
 
     lines += ["METHODOLOGY", "-" * 40, methodology_note, ""]
 

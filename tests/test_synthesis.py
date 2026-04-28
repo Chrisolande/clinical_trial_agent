@@ -29,7 +29,7 @@ async def test_run_qa_check_success_and_exception(
 
     monkeypatch.setattr(nodes.qa_checker, "run_qa_check", bad_run)
     out_bad = await nodes.run_qa_check({})
-    assert out_bad["qa_passed"] is True
+    assert out_bad["qa_passed"] is False
     assert out_bad["qa_issues"]
     assert out_bad["new_errors"]
 
@@ -37,7 +37,13 @@ async def test_run_qa_check_success_and_exception(
 def test_route_after_qa_branches() -> None:
     assert nodes.route_after_qa({"qa_passed": True}) == "generate_report"
     assert nodes.route_after_qa({"qa_passed": False, "qa_fix_attempts": 0}) == "attempt_qa_fix"
-    assert nodes.route_after_qa({"qa_passed": False, "qa_fix_attempts": 1}) == "flag_re_evaluation"
+    assert nodes.route_after_qa({"qa_passed": False, "qa_fix_attempts": 2}) == "flag_re_evaluation"
+    assert (
+        nodes.route_after_qa(
+            {"qa_passed": False, "qa_fix_attempts": 1, "synthesis_needs_re_evaluation": True}
+        )
+        == "flag_re_evaluation"
+    )
 
 
 @pytest.mark.asyncio
@@ -54,6 +60,7 @@ async def test_attempt_fix_and_flag_and_finalize() -> None:
     )
     assert fixed["qa_fix_attempts"] == 1
     assert fixed["trial_scores"][0]["trial_id"] == "B"
+    assert fixed["qa_remediation_actions"][0]["action"] == "rerank_trials"
 
     flagged = await nodes.flag_re_evaluation(
         {"qa_issues": [{"code": "X", "severity": "high", "message": "x"}]}
@@ -67,12 +74,19 @@ async def test_attempt_fix_and_flag_and_finalize() -> None:
             "report_json": {"ok": True},
             "report_text": "t",
             "synthesis_needs_re_evaluation": True,
+            "synthesis_retry_retrieval": False,
             "new_decision_entries": ["d"],
             "new_errors": ["e"],
+            "qa_fix_attempts": 1,
+            "qa_remediation_actions": [
+                {"attempt": "1", "action": "rerank_trials", "issue_code": "Q"}
+            ],
+            "qa_unresolved_issues": [],
         }
     )
     assert finalized["decision_history"] == ["d"]
     assert finalized["errors"] == ["e"]
+    assert finalized["qa_remediation"]["attempts"] == 1
 
 
 def test_build_text_report_formats_structured_and_string_qa_issues() -> None:
@@ -91,6 +105,7 @@ def test_build_text_report_formats_structured_and_string_qa_issues() -> None:
         "search_queries_used": [],
         "decision_history": [],
         "ranked_trials": [],
+        "qa_remediation": {"attempts": 0, "actions": [], "unresolved_issues": []},
     }
     structured = dict(base_report)
     structured["qa_issues"] = [{"code": "A", "severity": "critical", "message": "structured issue"}]
@@ -101,6 +116,82 @@ def test_build_text_report_formats_structured_and_string_qa_issues() -> None:
     legacy["qa_issues"] = ["legacy issue"]
     text_legacy = build_text_report(legacy)
     assert "legacy issue" in text_legacy
+
+
+def test_build_text_report_suppresses_not_applicable_gaps() -> None:
+    report = {
+        "generated_at": "2026-04-25T00:00:00+00:00",
+        "patient_summary": "age=50",
+        "executive_summary": "summary",
+        "total_trials_searched": 1,
+        "total_trials_evaluated": 1,
+        "strong_matches": [],
+        "moderate_matches": [],
+        "excluded_trial_count": 0,
+        "excluded_trials": [],
+        "information_gaps": [
+            {
+                "field_id": "not_applicable_pregnancy",
+                "field": "Pregnancy status",
+                "description": "Not applicable for male patient",
+                "priority": "high",
+            },
+            {
+                "field_id": "egfr_mutation_status",
+                "field": "EGFR mutation status",
+                "description": "Needed for selection",
+                "priority": "high",
+            },
+        ],
+        "methodology_note": "method",
+        "search_queries_used": [],
+        "decision_history": [],
+        "ranked_trials": [],
+        "qa_issues": [],
+        "qa_remediation": {"attempts": 0, "actions": [], "unresolved_issues": []},
+    }
+    text = build_text_report(report)
+    assert "EGFR mutation status" in text
+    assert "Pregnancy status" not in text
+
+
+@pytest.mark.asyncio
+async def test_attempt_fix_recompute_from_verdicts() -> None:
+    out = await nodes.attempt_qa_fix(
+        {
+            "qa_issues": [
+                {
+                    "code": "HARD_EXCLUSION_RANKING_CONFLICT",
+                    "severity": "critical",
+                    "message": "x",
+                }
+            ],
+            "qa_fix_attempts": 0,
+            "trial_scores": [{"trial_id": "T1", "tier": "moderate", "score": 0.91}],
+            "eligibility_verdicts": {"T1": {"hard_exclusion_failures": 1}},
+        }
+    )
+    assert out["trial_scores"][0]["tier"] == "disqualified"
+    assert out["trial_scores"][0]["score"] <= 0.2
+
+
+@pytest.mark.asyncio
+async def test_attempt_fix_escalates_retrieval_issue() -> None:
+    out = await nodes.attempt_qa_fix(
+        {
+            "qa_issues": [
+                {
+                    "code": "RETRIEVAL_FAILED_EMPTY_RESULT",
+                    "severity": "critical",
+                    "message": "retrieval empty",
+                }
+            ],
+            "qa_fix_attempts": 0,
+            "trial_scores": [],
+        }
+    )
+    assert out["synthesis_needs_re_evaluation"] is True
+    assert out["synthesis_retry_retrieval"] is True
 
 
 def test_collect_synthesis_inputs_merges_decisions() -> None:

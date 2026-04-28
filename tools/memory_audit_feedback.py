@@ -1,5 +1,6 @@
 """Audit and feedback methods for episodic memory."""
 
+import json
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
@@ -73,7 +74,7 @@ class MemoryAuditFeedbackMixin:
                 key,
                 run_id,
                 now,
-                outcome_tier_counts,
+                json.dumps(outcome_tier_counts, sort_keys=True),
                 model_version,
                 consent_flag,
             )
@@ -94,21 +95,34 @@ class MemoryAuditFeedbackMixin:
                 tenant_id,
                 facility_id,
             )
-        return [
-            {
-                "profile_hash": r["profile_hash"],
-                "run_id": r["run_id"],
-                "timestamp": r["timestamp"].isoformat(),
-                "outcome_tier_counts": (
-                    {str(k): int(v) for k, v in r["outcome_tier_counts"].items()}
-                    if isinstance(r["outcome_tier_counts"], dict)
-                    else {}
-                ),
-                "model_version": r["model_version"],
-                "consent_flag": bool(r["consent_flag"]),
-            }
-            for r in rows
-        ]
+        audits: list[dict[str, Any]] = []
+        for r in rows:
+            raw_counts = r["outcome_tier_counts"]
+            if isinstance(raw_counts, str):
+                try:
+                    decoded = json.loads(raw_counts)
+                except json.JSONDecodeError:
+                    decoded = {}
+            elif isinstance(raw_counts, dict):
+                decoded = raw_counts
+            else:
+                decoded = {}
+
+            counts = (
+                {str(k): int(v) for k, v in decoded.items()} if isinstance(decoded, dict) else {}
+            )
+
+            audits.append(
+                {
+                    "profile_hash": r["profile_hash"],
+                    "run_id": r["run_id"],
+                    "timestamp": r["timestamp"].isoformat(),
+                    "outcome_tier_counts": counts,
+                    "model_version": r["model_version"],
+                    "consent_flag": bool(r["consent_flag"]),
+                }
+            )
+        return audits
 
     async def save_feedback(
         self: _MemoryScopeProtocol,

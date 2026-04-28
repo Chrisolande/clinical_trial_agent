@@ -22,6 +22,24 @@ def test_settings_max_trials_defaults_to_query_limit() -> None:
     assert settings.max_trials_for_eligibility == 17
 
 
+def test_settings_ctgov_proxy_url_allows_loopback_http() -> None:
+    settings = Settings(
+        ctgov_proxy_url="http://localhost:8000/ctgov/search",
+        database_uri="postgresql://x",
+        memory_db_dsn="postgresql://x",
+    )
+    assert settings.ctgov_proxy_url == "http://localhost:8000/ctgov/search"
+
+
+def test_settings_ctgov_proxy_url_rejects_remote_http() -> None:
+    with pytest.raises(ValueError, match="CTGOV_PROXY_URL must be https"):
+        Settings(
+            ctgov_proxy_url="http://example.com/ctgov/search",
+            database_uri="postgresql://x",
+            memory_db_dsn="postgresql://x",
+        )
+
+
 def test_get_settings_cached(monkeypatch: pytest.MonkeyPatch) -> None:
     get_settings.cache_clear()
     monkeypatch.setenv("DATABASE_URI", "postgresql://cache")

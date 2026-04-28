@@ -1,3 +1,4 @@
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -11,6 +12,8 @@ _METHODOLOGY_NOTE = (
     "Strong matches require confidence on major criteria and no disqualifying exclusion triggers. "
     "Weak/disqualified trials are excluded from the main body."
 )
+
+_NOT_APPLICABLE_MARKERS = ("not_applicable", "not applicable", "n/a", "non-applicable")
 
 
 def _normalize_qa_issues(qa_issues: list[dict[str, Any] | str]) -> list[dict[str, str]]:
@@ -61,18 +64,28 @@ def _severity_for_missing_item(item: str, tier: str) -> str:
 
 def _collect_information_gaps(scored_trials: list[dict[str, Any]]) -> list[dict[str, Any]]:
     grouped: dict[str, dict[str, Any]] = {}
+    priority_rank = {"high": 3, "medium": 2, "low": 1}
     for trial in scored_trials:
         trial_id = str(trial.get("trial_id", ""))
         tier = str(trial.get("tier", "weak"))
         for item in trial.get("critical_missing_info", []) or []:
-            key = str(item).strip()
-            if not key:
+            raw_item = str(item).strip()
+            if not raw_item:
                 continue
-            severity = _severity_for_missing_item(key, tier)
+            if _is_not_applicable_gap({"description": raw_item, "field": raw_item, "category": ""}):
+                continue
+            normalized = _normalize_gap_item(raw_item)
+            key = normalized["field_id"]
+            severity = _severity_for_missing_item(raw_item, tier)
             if key not in grouped:
                 grouped[key] = {
-                    "field": key,
-                    "description": key,
+                    "field_id": key,
+                    "display_name": normalized["display_name"],
+                    "category": normalized["category"],
+                    "field": normalized["display_name"],
+                    "why_needed": normalized["why_needed"],
+                    "evidence_text": normalized["why_needed"],
+                    "description": normalized["why_needed"],
                     "priority": severity,
                     "affected_trial_ids": [trial_id] if trial_id else [],
                 }
@@ -80,7 +93,7 @@ def _collect_information_gaps(scored_trials: list[dict[str, Any]]) -> list[dict[
                 if trial_id and trial_id not in grouped[key]["affected_trial_ids"]:
                     grouped[key]["affected_trial_ids"].append(trial_id)
                 current = grouped[key]["priority"]
-                if TIER_ORDER.get(severity, 0) > TIER_ORDER.get(current, 0):
+                if priority_rank.get(severity, 0) > priority_rank.get(current, 0):
                     grouped[key]["priority"] = severity
 
     priority_order = {"high": 3, "medium": 2, "low": 1}
@@ -93,23 +106,81 @@ def _deduplicate_gaps(gaps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen: dict[str, dict[str, Any]] = {}
     priority_rank = {"high": 3, "medium": 2, "low": 1}
     for gap in gaps:
-        field = str(gap.get("field", "")).strip()
-        if not field:
+        if _is_not_applicable_gap(gap):
             continue
-        if field not in seen:
-            seen[field] = dict(gap)
+        field_id = str(gap.get("field_id", "")).strip() or _fallback_gap_field_id(gap)
+        display_name = str(gap.get("display_name") or gap.get("field") or "").strip()
+        if not field_id:
             continue
-        current = seen[field]
-        if len(str(gap.get("description", ""))) > len(str(current.get("description", ""))):
-            current["description"] = gap.get("description", current.get("description", ""))
+        normalized = dict(gap)
+        normalized["field_id"] = field_id
+        normalized["display_name"] = display_name or field_id.replace("_", " ").title()
+        normalized["field"] = normalized["display_name"]
+        rationale = str(
+            normalized.get("why_needed")
+            or normalized.get("evidence_text")
+            or normalized.get("description")
+            or ""
+        )
+        normalized["why_needed"] = rationale
+        normalized["evidence_text"] = rationale
+        normalized["description"] = rationale
+        normalized["affected_trial_ids"] = sorted(set(normalized.get("affected_trial_ids") or []))
+
+        if field_id not in seen:
+            seen[field_id] = normalized
+            continue
+        current = seen[field_id]
+        if len(str(normalized.get("description", ""))) > len(str(current.get("description", ""))):
+            rationale = str(normalized.get("description", ""))
+            current["why_needed"] = rationale
+            current["evidence_text"] = rationale
+            current["description"] = rationale
         current_priority = str(current.get("priority", "low")).lower()
-        new_priority = str(gap.get("priority", "low")).lower()
+        new_priority = str(normalized.get("priority", "low")).lower()
         if priority_rank.get(new_priority, 0) > priority_rank.get(current_priority, 0):
             current["priority"] = new_priority
         current_ids = set(current.get("affected_trial_ids", []))
-        new_ids = set(gap.get("affected_trial_ids", []))
+        new_ids = set(normalized.get("affected_trial_ids", []))
         current["affected_trial_ids"] = sorted(current_ids | new_ids)
     return list(seen.values())
+
+
+def _is_not_applicable_gap(gap: dict[str, Any]) -> bool:
+    text = (
+        " ".join(
+            [
+                str(gap.get("field_id", "")),
+                str(gap.get("field", "")),
+                str(gap.get("display_name", "")),
+                str(gap.get("description", "")),
+                str(gap.get("why_needed", "")),
+                str(gap.get("category", "")),
+            ]
+        )
+        .strip()
+        .lower()
+    )
+    if not text:
+        return False
+    return any(marker in text for marker in _NOT_APPLICABLE_MARKERS)
+
+
+def _fallback_gap_field_id(gap: dict[str, Any]) -> str:
+    text = str(gap.get("field") or gap.get("display_name") or "").strip().lower()
+    slug = re.sub(r"[^a-z0-9]+", "_", text).strip("_")
+    return slug or "additional_clinical_detail"
+
+
+def _normalize_gap_item(raw_item: str) -> dict[str, str]:
+    slug = re.sub(r"[^a-z0-9]+", "_", raw_item.lower()).strip("_")
+    display_name = raw_item
+    return {
+        "field_id": slug or "additional_clinical_detail",
+        "display_name": display_name,
+        "category": "clinical",
+        "why_needed": raw_item,
+    }
 
 
 def _merge_information_gaps(
@@ -178,6 +249,7 @@ def _build_report_payload(
     decision_history: list[str],
     qa_issues: list[dict[str, str]],
     retrieval_errors: list[str],
+    qa_remediation: dict[str, Any] | None,
 ) -> dict[str, Any]:
     strong, moderate, weak, disqualified = _partition_trials(enriched_trials)
     retrieval_failed = bool(retrieval_errors) and len(enriched_trials) == 0
@@ -201,6 +273,7 @@ def _build_report_payload(
         "excluded_trials": weak + disqualified,
         "information_gaps": information_gaps,
         "qa_issues": qa_issues,
+        "qa_remediation": qa_remediation or {"attempts": 0, "actions": [], "unresolved_issues": []},
         "methodology_note": _METHODOLOGY_NOTE,
         "search_queries_used": list(dict.fromkeys(search_queries)),
         "decision_history": decision_history,
@@ -218,6 +291,7 @@ async def build_report(
     decision_history: list[str],
     qa_issues: list[dict[str, Any] | str],
     retrieval_errors: list[str] | None = None,
+    qa_remediation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     ranked = _sort_by_tier_then_score(scored_trials)
     summary_data = await generate_executive_summary(patient_profile, ranked)
@@ -233,6 +307,7 @@ async def build_report(
         decision_history=decision_history,
         qa_issues=_normalize_qa_issues(qa_issues),
         retrieval_errors=list(retrieval_errors or []),
+        qa_remediation=qa_remediation,
     )
 
 

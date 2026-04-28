@@ -44,13 +44,21 @@ def test_inclusion_assessors_cover_age_melanoma_biomarker_performance() -> None:
         "Melanoma diagnosis not explicit in profile",
     )
 
-    assert eligibility_fallback._assess_inclusion_biomarker("braf mutation", "braf positive") == (
+    assert eligibility_fallback._assess_inclusion_biomarker(
+        "braf mutation", {"biomarkers": ["BRAF V600E mutation positive"]}
+    ) == (
         "MEETS",
-        "Relevant biomarker evidence exists in profile",
+        "Criterion-specific biomarker evidence exists in profile",
     )
-    assert eligibility_fallback._assess_inclusion_biomarker("pd-l1", "unknown") == (
+    assert eligibility_fallback._assess_inclusion_biomarker("pd-l1", {"biomarkers": []}) == (
         "UNCERTAIN",
-        "Required biomarker information missing",
+        "Criterion-specific biomarker result missing",
+    )
+    assert eligibility_fallback._assess_inclusion_biomarker(
+        "mutation required", {"biomarkers": ["KRAS mutation positive"]}
+    ) == (
+        "UNCERTAIN",
+        "Criterion requires specific biomarker target; generic mutation evidence is insufficient",
     )
 
     assert eligibility_fallback._assess_inclusion_performance(
@@ -68,8 +76,8 @@ def test_exclusion_assessor_and_append_outcome() -> None:
         "Profile indicates uveal melanoma exclusion",
     )
     assert eligibility_fallback._assess_exclusion("pregnancy", {"sex": "male"}, "") == (
-        "MEETS",
-        "Pregnancy exclusion not applicable to male patient",
+        "NOT_APPLICABLE",
+        "Reproductive criterion not applicable to male patient",
     )
     assert eligibility_fallback._assess_exclusion("active infection", {}, "") == (
         "UNCERTAIN",

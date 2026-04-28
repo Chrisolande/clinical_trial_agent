@@ -1,4 +1,5 @@
 import pytest
+from pydantic import SecretStr
 from tools.errors import ClinicalTrialsClientError
 
 import clinical_trial_agent.clinical_trials as clinical_trials
@@ -115,6 +116,7 @@ async def test_request_helper_uses_urllib_fallback_on_403(monkeypatch: pytest.Mo
                 "ctgov_user_agent": "test-agent",
                 "ctgov_accept": "application/json",
                 "ctgov_proxy_url": "",
+                "ctgov_proxy_token": SecretStr(""),
                 "ctgov_transport_mode": "get",
             },
         )(),
@@ -130,3 +132,47 @@ async def test_request_helper_uses_urllib_fallback_on_403(monkeypatch: pytest.Mo
     )
     assert isinstance(result, dict)
     assert "studies" in result
+
+
+@pytest.mark.asyncio
+async def test_request_helper_returns_proxy_unavailable_error_for_phi(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = clinical_trials.httpx.Request("POST", "http://localhost:8000/ctgov/search")
+    req_error = clinical_trials.httpx.ConnectError("boom", request=request)
+
+    class FakeClient:
+        async def __aenter__(self) -> "FakeClient":
+            return self
+
+        async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
+            _ = (exc_type, exc, tb)
+
+        async def post(self, *args: object, **kwargs: object) -> object:
+            _ = (args, kwargs)
+            raise req_error
+
+    monkeypatch.setattr(clinical_trials.httpx, "AsyncClient", lambda **_: FakeClient())
+    monkeypatch.setattr(
+        clinical_trials,
+        "get_settings",
+        lambda: type(
+            "S",
+            (),
+            {
+                "ctgov_retry_attempts": 1,
+                "ctgov_retry_backoff_base": 2.0,
+                "ctgov_user_agent": "test-agent",
+                "ctgov_accept": "application/json",
+                "ctgov_proxy_url": "http://localhost:8000/ctgov/search",
+                "ctgov_proxy_token": SecretStr(""),
+                "ctgov_transport_mode": "get",
+            },
+        )(),
+    )
+
+    with pytest.raises(ClinicalTrialsClientError, match="ClinicalTrials proxy unavailable"):
+        await clinical_trials._request_json_with_retry(
+            "https://clinicaltrials.gov/api/v2/studies",
+            {"format": "json", "query.cond": "lung cancer"},
+        )

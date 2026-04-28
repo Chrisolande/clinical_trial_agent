@@ -31,6 +31,7 @@ ClinicalTrials.gov retrieval transport is enforced in `clinical_trials._request_
 - If PHI-bearing retrieval is attempted without `CTGOV_PROXY_URL`, execution fails closed with a configuration error.
 - For non-PHI retrieval, transport follows `CTGOV_TRANSPORT_MODE` (`get` default, optional `post`).
 - On HTTP 403, urllib fallback is disabled for PHI-bearing requests.
+- In production, `CTGOV_PROXY_URL` should be HTTPS. For local development, loopback HTTP endpoints such as `http://localhost` or `http://127.0.0.1` are accepted.
 
 ## QA gating and severity model
 
@@ -68,7 +69,7 @@ All secrets are loaded from environment variables. The `bootstrap_environment()`
 - `PROFILE_HASH_SALT` - salt used in patient profile hashing
 - `CLINICAL_DATA_EXTERNAL_LLM_CONSENT` - external LLM consent gate flag
 - `CTGOV_TRANSPORT_MODE` - ClinicalTrials.gov transport mode for non-PHI retrieval (`get`/`post`)
-- `CTGOV_PROXY_URL` - optional PHI-safe proxy endpoint for retrieval POST transport (must be `https://`)
+- `CTGOV_PROXY_URL` - optional PHI-safe proxy endpoint for retrieval POST transport (HTTPS in production; loopback HTTP accepted for local development)
 - `TENANT_ID` / `FACILITY_ID` - required governance scope for clinical data memory/audit/feedback
 
 The `.gitignore` excludes `.env`. Never commit secrets to the repository.

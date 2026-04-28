@@ -65,7 +65,7 @@ DDL = """
     );
 """
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 def get_profile_hash_salt() -> str:

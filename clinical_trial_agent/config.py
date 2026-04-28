@@ -1,4 +1,5 @@
 import functools
+import ipaddress
 import os
 import tempfile
 from pathlib import Path
@@ -80,6 +81,7 @@ class Settings(BaseSettings):
     ctgov_base_url: str = "https://clinicaltrials.gov/api/v2"
     ctgov_transport_mode: Literal["get", "post"] = "get"
     ctgov_proxy_url: str | None = None
+    ctgov_proxy_token: SecretStr = Field(default=SecretStr(""), repr=False)
 
     max_trials_per_query: int = 10
     cache_ttl_seconds: int = 3600 * 24
@@ -125,9 +127,22 @@ class Settings(BaseSettings):
         if not value:
             return None
         parsed = urlparse(value)
-        if parsed.scheme != "https" or not parsed.netloc:
-            raise ValueError("CTGOV_PROXY_URL must be a valid https URL")
-        return value
+        if not parsed.netloc:
+            raise ValueError("CTGOV_PROXY_URL must include a host")
+        if parsed.scheme == "https":
+            return value
+        if parsed.scheme == "http" and parsed.hostname is not None:
+            try:
+                ip = ipaddress.ip_address(parsed.hostname)
+            except ValueError:
+                if parsed.hostname.lower() == "localhost":
+                    return value
+            else:
+                if ip.is_loopback:
+                    return value
+        raise ValueError(
+            "CTGOV_PROXY_URL must be https, or http://localhost / 127.0.0.1 for local development"
+        )
 
     @model_validator(mode="after")
     def _validate_dsn_consistency(self) -> "Settings":

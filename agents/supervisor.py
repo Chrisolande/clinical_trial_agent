@@ -268,6 +268,7 @@ class SupervisorOrchestrator:
         max_retries = max(0, int(settings.max_retry_attempts))
         max_attempts = 1 if settings.one_pass_mode else max_retries + 1
         eligibility: dict[str, Any] = {}
+        synthesis: dict[str, Any] = {}
 
         for retry_count in range(max_attempts):
             with trace_span(
@@ -315,28 +316,75 @@ class SupervisorOrchestrator:
             feedback_rows = await memory.list_feedback(_profile_hash_for_feedback(patient_profile))
         adjusted_scores = _apply_feedback_adjustments(run_state.scored_trials, feedback_rows)
 
-        with trace_span("supervisor.run_synthesis", run_id=thread_id, slo_ms=6000):
-            synthesis_kwargs: dict[str, Any] = {
-                "patient_profile": patient_profile,
-                "trial_scores": adjusted_scores,
-                "eligibility_verdicts": eligibility.get("eligibility_verdicts"),
-                "missing_info_recommendations": eligibility.get("missing_info_recommendations"),
-                "trials_raw": list(run_state.retrieval_result.get("trials_raw", [])),
-                "search_queries": list(run_state.retrieval_result.get("search_queries", [])),
-                "decision_history": self._compress_decision_history(
-                    list(eligibility.get("decision_history", []))
-                ),
-                "trials_with_criteria": eligibility.get("trials_with_criteria"),
-                "thread_id": thread_id,
-            }
-            if "retrieval_errors" in inspect.signature(self.run_synthesis).parameters:
-                synthesis_kwargs["retrieval_errors"] = list(
-                    run_state.retrieval_result.get("retrieval_errors", [])
+        for reeval_attempt in range(max_attempts):
+            with trace_span("supervisor.run_synthesis", run_id=thread_id, slo_ms=6000):
+                synthesis_kwargs: dict[str, Any] = {
+                    "patient_profile": patient_profile,
+                    "trial_scores": adjusted_scores,
+                    "eligibility_verdicts": eligibility.get("eligibility_verdicts"),
+                    "missing_info_recommendations": eligibility.get("missing_info_recommendations"),
+                    "trials_raw": list(run_state.retrieval_result.get("trials_raw", [])),
+                    "search_queries": list(run_state.retrieval_result.get("search_queries", [])),
+                    "decision_history": self._compress_decision_history(
+                        list(eligibility.get("decision_history", []))
+                    ),
+                    "trials_with_criteria": eligibility.get("trials_with_criteria"),
+                    "thread_id": thread_id,
+                }
+                if "retrieval_errors" in inspect.signature(self.run_synthesis).parameters:
+                    synthesis_kwargs["retrieval_errors"] = list(
+                        run_state.retrieval_result.get("retrieval_errors", [])
+                    )
+                synthesis = await self.run_synthesis(
+                    **synthesis_kwargs,
                 )
-            synthesis = await self.run_synthesis(
-                **synthesis_kwargs,
+            run_state.final_result = self._unwrap_synthesis_result(synthesis)
+            needs_re_eval = bool(run_state.final_result.get("synthesis_needs_re_evaluation", False))
+            needs_retrieval_retry = bool(
+                run_state.final_result.get("synthesis_retry_retrieval", False)
             )
-        run_state.final_result = self._unwrap_synthesis_result(synthesis)
+
+            if settings.one_pass_mode or not needs_re_eval:
+                break
+            if reeval_attempt >= max_retries:
+                break
+
+            if needs_retrieval_retry:
+                with trace_span(
+                    "supervisor.remediation_retrieval_retry",
+                    run_id=thread_id,
+                    attempt=reeval_attempt + 1,
+                    slo_ms=6000,
+                ):
+                    raw_retrieval = await self.run_retrieval(
+                        patient_profile=patient_profile,
+                        retry_count=reeval_attempt + 1,
+                        thread_id=thread_id,
+                    )
+                run_state.retrieval_result = self._compress_retrieval_output(raw_retrieval)
+
+            limited_trials = list(run_state.retrieval_result.get("trials_deduplicated", []))[
+                : settings.max_trials_for_eligibility
+            ]
+            with trace_span(
+                "supervisor.remediation_eligibility_retry",
+                run_id=thread_id,
+                attempt=reeval_attempt + 1,
+                trial_count=len(limited_trials),
+                slo_ms=12000,
+            ):
+                eligibility = await self.run_eligibility(
+                    patient_profile=patient_profile,
+                    trials_deduplicated=limited_trials,
+                    eligibility_verdicts=eligibility.get("eligibility_verdicts"),
+                    thread_id=thread_id,
+                    attempt=reeval_attempt + 1,
+                )
+            run_state.scored_trials = self._compress_scored_trials(
+                list(eligibility.get("trial_scores", []))
+            )
+            adjusted_scores = _apply_feedback_adjustments(run_state.scored_trials, feedback_rows)
+
         return _normalize_supervisor_output(run_state.final_result)
 
     @staticmethod

@@ -30,6 +30,8 @@ class EndToEndState(TypedDict):
     synthesis_result: dict[str, Any]
     report_json: dict[str, Any] | None
     report_text: str | None
+    synthesis_needs_re_evaluation: bool
+    synthesis_retry_retrieval: bool
 
 
 class EndToEndOutput(TypedDict):
@@ -130,6 +132,10 @@ async def retry_retrieval_node(state: EndToEndState) -> dict[str, Any]:
     return {"retry_count": int(state.get("retry_count", 0)) + 1}
 
 
+async def retry_eligibility_node(state: EndToEndState) -> dict[str, Any]:
+    return {"retry_count": int(state.get("retry_count", 0)) + 1}
+
+
 async def run_synthesis_node(state: EndToEndState) -> dict[str, Any]:
     retrieval_result = state.get("retrieval_result") or {}
     eligibility_result = state.get("eligibility_result") or {}
@@ -158,11 +164,31 @@ async def run_synthesis_node(state: EndToEndState) -> dict[str, Any]:
             source="synthesis subgraph",
         )
     normalized = _normalize_output_contract(result)
+    needs_re_eval = bool(normalized.get("synthesis_needs_re_evaluation", False))
+    needs_retrieval_retry = bool(normalized.get("synthesis_retry_retrieval", False))
     return {
         "synthesis_result": normalized,
         "report_json": normalized.get("report_json"),
         "report_text": normalized.get("report_text"),
+        "synthesis_needs_re_evaluation": needs_re_eval,
+        "synthesis_retry_retrieval": needs_retrieval_retry,
     }
+
+
+def route_after_synthesis(
+    state: EndToEndState,
+) -> Literal["retry_retrieval", "retry_eligibility", "end"]:
+    if get_settings().one_pass_mode:
+        return "end"
+    retry_count = int(state.get("retry_count", 0))
+    max_retries = max(0, int(get_settings().max_retry_attempts))
+    if retry_count >= max_retries:
+        return "end"
+    if not bool(state.get("synthesis_needs_re_evaluation", False)):
+        return "end"
+    if bool(state.get("synthesis_retry_retrieval", False)):
+        return "retry_retrieval"
+    return "retry_eligibility"
 
 
 def _build_end_to_end_graph() -> Any:
@@ -175,6 +201,7 @@ def _build_end_to_end_graph() -> Any:
     graph.add_node("run_retrieval", run_retrieval_node)
     graph.add_node("run_eligibility", run_eligibility_node)
     graph.add_node("retry_retrieval", retry_retrieval_node)
+    graph.add_node("retry_eligibility", retry_eligibility_node)
     graph.add_node("run_synthesis", run_synthesis_node)
 
     graph.add_edge(START, "run_retrieval")
@@ -188,7 +215,16 @@ def _build_end_to_end_graph() -> Any:
         },
     )
     graph.add_edge("retry_retrieval", "run_retrieval")
-    graph.add_edge("run_synthesis", END)
+    graph.add_edge("retry_eligibility", "run_eligibility")
+    graph.add_conditional_edges(
+        "run_synthesis",
+        route_after_synthesis,
+        {
+            "retry_retrieval": "retry_retrieval",
+            "retry_eligibility": "retry_eligibility",
+            "end": END,
+        },
+    )
 
     return graph.compile()
 

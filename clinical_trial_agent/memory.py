@@ -171,6 +171,21 @@ class EpisodicMemory(MemoryAuditFeedbackMixin, PostgresBase):
                     "CREATE INDEX IF NOT EXISTS idx_llm_cache_prefix ON llm_cache (prefix)"
                 )
 
+            if current_version < 7:
+                await conn.execute(
+                    """
+                    ALTER TABLE pipeline_audit_log
+                    ALTER COLUMN outcome_tier_counts
+                    TYPE JSONB
+                    USING
+                        CASE
+                            WHEN outcome_tier_counts IS NULL THEN '{}'::jsonb
+                            WHEN pg_typeof(outcome_tier_counts)::text = 'jsonb' THEN outcome_tier_counts
+                            ELSE outcome_tier_counts::text::jsonb
+                        END
+                    """
+                )
+
             if row is None:
                 await conn.execute(
                     "INSERT INTO schema_version (version) VALUES ($1)", _SCHEMA_VERSION

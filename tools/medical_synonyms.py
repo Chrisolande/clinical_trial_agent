@@ -10,9 +10,32 @@ from loguru import logger
 _MAX_EXPANDED_TOKENS = 64
 
 _CONDITION_SYNONYMS_FALLBACK: dict[str, list[str]] = {
-    "crc": ["colorectal", "colorectal cancer", "colon cancer", "rectal cancer"],
-    "nsclc": ["non small cell", "non-small-cell", "non-small-cell lung cancer"],
-    "sclc": ["small cell lung", "small-cell lung cancer"],
+    "crc": [
+        "colorectal",
+        "colorectal cancer",
+        "colorectal carcinoma",
+        "colon cancer",
+        "colon carcinoma",
+        "rectal cancer",
+        "rectal carcinoma",
+        "bowel cancer",
+    ],
+    "mcrc": ["metastatic colorectal cancer", "metastatic crc", "stage iv colorectal cancer"],
+    "nsclc": [
+        "non small cell lung cancer",
+        "non-small-cell lung cancer",
+        "non small cell lung carcinoma",
+        "nonsquamous nsclc",
+        "nonsquamous non small cell lung cancer",
+    ],
+    "sclc": ["small cell lung cancer", "small-cell lung cancer", "small cell carcinoma of lung"],
+    "hnscc": [
+        "head and neck squamous cell carcinoma",
+        "squamous cell carcinoma of head and neck",
+    ],
+    "hcc": ["hepatocellular carcinoma", "liver cell carcinoma"],
+    "gbm": ["glioblastoma", "glioblastoma multiforme"],
+    "pdac": ["pancreatic ductal adenocarcinoma", "ductal adenocarcinoma of pancreas"],
     "her2": ["erbb2", "her-2"],
     "tnbc": ["triple negative breast cancer", "triple-negative breast cancer"],
     "aml": ["acute myeloid leukemia", "acute myelogenous leukemia"],
@@ -90,16 +113,55 @@ def _get_term_parser() -> Any | None:
     return parser
 
 
+@lru_cache(maxsize=1)
+def _build_alias_matchers() -> dict[str, list[tuple[set[str], str]]]:
+    alias_matchers: dict[str, list[tuple[set[str], str]]] = {}
+    for canonical, phrases in _CONDITION_SYNONYMS_FALLBACK.items():
+        variants = [canonical, *phrases]
+        matchers: list[tuple[set[str], str]] = []
+        for variant in variants:
+            normalized_tokens = _normalize_text_to_tokens(variant)
+            compact_variant = _compact_form(variant)
+            if normalized_tokens or compact_variant:
+                matchers.append((normalized_tokens, compact_variant))
+        alias_matchers[canonical] = matchers
+    return alias_matchers
+
+
+def _compact_form(text: str) -> str:
+    compact = re.sub(r"[^a-z0-9]+", "", text.lower())
+    return compact if len(compact) > 2 else ""
+
+
 def _legacy_expand(tokens: set[str]) -> set[str]:
     expanded = set(tokens)
-    for key, values in _CONDITION_SYNONYMS_FALLBACK.items():
-        normalized_key = key.lower()
-        synonym_tokens = set(normalized_key.replace("-", " ").split())
-        for phrase in values:
-            synonym_tokens.update(phrase.lower().replace("-", " ").split())
-        if normalized_key in expanded or expanded.intersection(synonym_tokens):
-            expanded.add(normalized_key)
-            expanded.update(synonym_tokens)
+    alias_matchers = _build_alias_matchers()
+    compact_inputs = {_compact_form(token) for token in expanded}
+    compact_inputs.discard("")
+
+    for canonical, matchers in alias_matchers.items():
+        if canonical == "sclc" and ("nsclc" in expanded or "non" in expanded):
+            # Guard against matching "small cell" inside "non-small cell".
+            continue
+        matched = False
+        for candidate_tokens, candidate_compact in matchers:
+            if candidate_tokens and candidate_tokens.issubset(expanded):
+                matched = True
+                break
+            if candidate_compact and candidate_compact in compact_inputs:
+                matched = True
+                break
+        if not matched:
+            continue
+
+        expanded.add(canonical)
+        expanded.add(_compact_form(canonical))
+        for phrase in _CONDITION_SYNONYMS_FALLBACK.get(canonical, []):
+            compact_phrase = _compact_form(phrase)
+            if compact_phrase:
+                expanded.add(compact_phrase)
+
+    expanded.discard("")
     return expanded
 
 

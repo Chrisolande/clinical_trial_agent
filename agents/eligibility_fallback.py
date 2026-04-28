@@ -64,6 +64,33 @@ def _profile_blob(patient_profile: dict[str, Any]) -> str:
     return " ".join(_to_text(patient_profile.get(k, "")) for k in keys).lower()
 
 
+def _biomarker_blob(patient_profile: dict[str, Any]) -> str:
+    return _to_text(patient_profile.get("biomarkers", "")).lower()
+
+
+def _is_reproductive_criterion(lowered: str) -> bool:
+    return any(
+        keyword in lowered
+        for keyword in (
+            "pregnan",
+            "nursing",
+            "lactat",
+            "breastfeed",
+        )
+    )
+
+
+def _sex_specific_not_applicable(
+    lowered: str, patient_profile: dict[str, Any]
+) -> tuple[str, str] | None:
+    if not _is_reproductive_criterion(lowered):
+        return None
+    sex = str(patient_profile.get("sex", "")).strip().lower()
+    if sex == "male":
+        return "NOT_APPLICABLE", "Reproductive criterion not applicable to male patient"
+    return None
+
+
 def _extract_age_bound(text: str) -> tuple[int | None, int | None]:
     lowered = text.lower()
     min_age: int | None = None
@@ -126,6 +153,10 @@ def _assess_inclusion(
     text: str, patient_profile: dict[str, Any], profile_blob: str
 ) -> tuple[str, str]:
     lowered = text.lower()
+    not_applicable = _sex_specific_not_applicable(lowered, patient_profile)
+    if not_applicable is not None:
+        return not_applicable
+
     age_result = _assess_inclusion_age(lowered, patient_profile.get("age"))
     if age_result is not None:
         return age_result
@@ -134,7 +165,7 @@ def _assess_inclusion(
     if melanoma_result is not None:
         return melanoma_result
 
-    biomarker_result = _assess_inclusion_biomarker(lowered, profile_blob)
+    biomarker_result = _assess_inclusion_biomarker(lowered, patient_profile)
     if biomarker_result is not None:
         return biomarker_result
 
@@ -164,12 +195,76 @@ def _assess_inclusion_melanoma(lowered: str, profile_blob: str) -> tuple[str, st
     return "UNCERTAIN", "Melanoma diagnosis not explicit in profile"
 
 
-def _assess_inclusion_biomarker(lowered: str, profile_blob: str) -> tuple[str, str] | None:
-    biomarker_keywords = ("braf", "pd-l1", "biomarker", "mutation")
+def _extract_biomarker_targets(lowered: str) -> set[str]:
+    markers = (
+        "alk",
+        "braf",
+        "brca1",
+        "brca2",
+        "egfr",
+        "erbb2",
+        "fgfr",
+        "her2",
+        "idh1",
+        "idh2",
+        "kras",
+        "met",
+        "msi",
+        "ntrk",
+        "pd-l1",
+        "pik3ca",
+        "ret",
+        "ros1",
+        "tmb",
+    )
+    return {
+        marker
+        for marker in markers
+        if re.search(rf"(?<![a-z0-9]){re.escape(marker)}(?![a-z0-9])", lowered)
+    }
+
+
+def _has_explicit_molecular_evidence(biomarker_blob: str) -> bool:
+    if _extract_biomarker_targets(biomarker_blob):
+        return True
+    return bool(
+        re.search(
+            r"\b[a-z0-9-]{3,12}\s*(?:mutation|mutated|fusion|rearrangement|amplification|deletion)\b",
+            biomarker_blob,
+        )
+    )
+
+
+def _assess_inclusion_biomarker(
+    lowered: str, patient_profile: dict[str, Any]
+) -> tuple[str, str] | None:
+    biomarker_keywords = ("braf", "pd-l1", "biomarker", "mutation", "molecular", "genomic")
     if not any(keyword in lowered for keyword in biomarker_keywords):
         return None
-    if any(keyword in profile_blob for keyword in ("braf", "pd-l1", "mutation")):
-        return "MEETS", "Relevant biomarker evidence exists in profile"
+
+    criterion_targets = _extract_biomarker_targets(lowered)
+    biomarker_blob = _biomarker_blob(patient_profile)
+
+    if criterion_targets:
+        if any(
+            re.search(rf"(?<![a-z0-9]){re.escape(target)}(?![a-z0-9])", biomarker_blob)
+            for target in criterion_targets
+        ):
+            return "MEETS", "Criterion-specific biomarker evidence exists in profile"
+        return "UNCERTAIN", "Criterion-specific biomarker result missing"
+
+    is_generic_mutation_criterion = (
+        "mutation" in lowered or "molecular" in lowered or "genomic" in lowered
+    )
+    if is_generic_mutation_criterion:
+        return (
+            "UNCERTAIN",
+            "Criterion requires specific biomarker target; generic mutation evidence is insufficient",
+        )
+
+    if "biomarker" in lowered and _has_explicit_molecular_evidence(biomarker_blob):
+        return "MEETS", "Biomarker evidence exists in profile"
+
     return "UNCERTAIN", "Required biomarker information missing"
 
 
@@ -187,14 +282,14 @@ def _assess_exclusion(
     text: str, patient_profile: dict[str, Any], profile_blob: str
 ) -> tuple[str, str]:
     lowered = text.lower()
+    not_applicable = _sex_specific_not_applicable(lowered, patient_profile)
+    if not_applicable is not None:
+        return not_applicable
 
     if "uveal melanoma" in lowered:
         if "uveal" in profile_blob:
             return "FAILS", "Profile indicates uveal melanoma exclusion"
         return "MEETS", "No explicit uveal melanoma evidence"
-
-    if "pregnan" in lowered and str(patient_profile.get("sex", "")).lower() == "male":
-        return "MEETS", "Pregnancy exclusion not applicable to male patient"
 
     if any(k in lowered for k in ["autoimmune", "organ transplant", "active infection"]):
         if any(k in profile_blob for k in ["autoimmune", "transplant", "infection"]):
@@ -228,6 +323,8 @@ def _append_outcome(
         inclusion_met.append(text)
     elif verdict == "FAILS":
         inclusion_failed.append(text)
+    elif verdict == "NOT_APPLICABLE":
+        return
     else:
         inclusion_uncertain.append(text)
         missing.append(reason)

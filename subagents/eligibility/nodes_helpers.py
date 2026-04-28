@@ -30,7 +30,27 @@ def _profile_hash_for_cache(patient_profile: dict[str, Any]) -> str:
 def _tokenize(text: str) -> set[str]:
     cleaned = "".join(ch.lower() if ch.isalnum() else " " for ch in text)
     stopwords = {"a", "of", "in", "for", "the", "and", "with", "to", "or"}
-    return {tok for tok in cleaned.split() if len(tok) > 2 and tok not in stopwords}
+    raw_tokens = cleaned.split()
+    tokens: set[str] = set()
+    acronym_buffer: list[str] = []
+
+    def _flush_acronym() -> None:
+        if len(acronym_buffer) >= 3:
+            joined = "".join(acronym_buffer)
+            if joined not in stopwords:
+                tokens.add(joined)
+        acronym_buffer.clear()
+
+    for tok in raw_tokens:
+        if len(tok) == 1 and tok.isalpha():
+            acronym_buffer.append(tok)
+            continue
+        _flush_acronym()
+        if len(tok) > 2 and tok not in stopwords:
+            tokens.add(tok)
+
+    _flush_acronym()
+    return tokens
 
 
 def _is_plausibly_relevant(trial: dict[str, Any], patient_condition: str) -> bool:

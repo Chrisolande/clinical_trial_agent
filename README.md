@@ -78,6 +78,7 @@ CLINICAL_DATA_EXTERNAL_LLM_CONSENT=false
 CTGOV_TRANSPORT_MODE=get
 # Optional: route PHI-bearing retrieval via internal proxy/tokenized path
 CTGOV_PROXY_URL=https://your-internal-proxy/ctgov/search
+# Local development exception: http://localhost:8000/ctgov/search is also allowed
 ```
 
 > [!IMPORTANT]
@@ -85,7 +86,7 @@ CTGOV_PROXY_URL=https://your-internal-proxy/ctgov/search
 
 ## Security & operational controls
 
-- **PHI-safe retrieval transport**: when condition/intervention terms are present, retrieval is allowed only through `CTGOV_PROXY_URL` using a POST JSON envelope (no patient-derived URL query params). The proxy URL must be HTTPS, and missing proxy configuration fails closed.
+- **PHI-safe retrieval transport**: when condition/intervention terms are present, retrieval is allowed only through `CTGOV_PROXY_URL` using a POST JSON envelope (no patient-derived URL query params). The proxy URL must be HTTPS in production; loopback HTTP (`http://localhost` / `http://127.0.0.1`) is allowed for local development, and missing proxy configuration fails closed.
 - **External LLM consent gate**: `config.get_llm()` enforces `CLINICAL_DATA_EXTERNAL_LLM_CONSENT=true` for external providers (`deepseek`, `openai`, `anthropic`) on PHI-bearing calls; this is fail-closed.
 - **QA fail-closed**: QA emits structured issues (`code`, `severity`, `message`) and blocks report generation on critical findings.
 - **Deterministic medication safety**: known contraindications and malformed medication inputs disqualify affected trials.

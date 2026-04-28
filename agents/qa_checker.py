@@ -2,6 +2,30 @@ from typing import Any, TypedDict
 
 from clinical_trial_agent.config import TIER_ORDER
 
+_KNOWN_BIOMARKERS = (
+    "egfr",
+    "alk",
+    "ros1",
+    "braf",
+    "kras",
+    "her2",
+    "pd-l1",
+    "pdl1",
+    "msi",
+    "tmb",
+    "met",
+    "ret",
+    "ntrk",
+)
+
+_NO_CONCERN_PHRASES = (
+    "no concerns",
+    "no major concerns",
+    "none identified",
+    "no significant concerns",
+)
+_NOT_APPLICABLE_MARKERS = ("not_applicable", "not applicable", "n/a", "non-applicable")
+
 
 class QAIssue(TypedDict):
     code: str
@@ -31,8 +55,13 @@ async def run_qa_check(
         )
     issues.extend(_check_score_verdict_alignment(eligibility_verdicts, scored_trials))
     issues.extend(_check_age_consistency(patient_profile, eligibility_verdicts))
-    qa_passed = not any(issue["severity"] == "critical" for issue in issues)
+    issues.extend(_check_additional_quality_rules(eligibility_verdicts, scored_trials))
+    qa_passed = not any(_is_blocking_issue(issue) for issue in issues)
     return {"qa_passed": qa_passed, "qa_issues": issues}
+
+
+def _is_blocking_issue(issue: QAIssue) -> bool:
+    return str(issue.get("severity", "")).lower() == "critical"
 
 
 def _check_age_consistency(
@@ -120,3 +149,179 @@ def _check_score_verdict_alignment(
                 )
             )
     return issues
+
+
+def _check_additional_quality_rules(
+    eligibility_verdicts: dict[str, dict[str, Any]],
+    scored_trials: list[dict[str, Any]],
+) -> list[QAIssue]:
+    issues: list[QAIssue] = []
+    issues.extend(_check_strong_too_few_criteria(scored_trials))
+    issues.extend(_check_na_inference_errors(eligibility_verdicts))
+    issues.extend(_check_duplicate_missing_info(scored_trials))
+    issues.extend(_check_not_applicable_leakage(scored_trials))
+    issues.extend(_check_generic_biomarker_inference(scored_trials))
+    issues.extend(_check_summary_language_vs_critical_gaps(scored_trials))
+    return issues
+
+
+def _check_strong_too_few_criteria(scored_trials: list[dict[str, Any]]) -> list[QAIssue]:
+    flagged: list[str] = []
+    for trial in scored_trials:
+        if str(trial.get("tier", "weak")) != "strong":
+            continue
+        assessed = int(trial.get("meets_count", 0)) + int(trial.get("fails_count", 0))
+        if assessed < 3:
+            flagged.append(str(trial.get("trial_id", "")))
+    if not flagged:
+        return []
+    return [
+        _issue(
+            "STRONG_TOO_FEW_CRITERIA",
+            "high",
+            (
+                "Strong-tier trial(s) have too few assessed criteria (<3), which may overstate confidence: "
+                f"{flagged[:5]}."
+            ),
+        )
+    ]
+
+
+def _check_na_inference_errors(eligibility_verdicts: dict[str, dict[str, Any]]) -> list[QAIssue]:
+    flagged: list[str] = []
+    na_markers = ("n/a", "not applicable", "non-applicable")
+    for trial_id, verdict_data in eligibility_verdicts.items():
+        for verdict in verdict_data.get("verdicts", []):
+            verdict_label = str(verdict.get("verdict", "")).upper()
+            criterion_text = str(verdict.get("criterion_text", "")).lower()
+            if verdict_label in {"MEETS", "FAILS"} and any(m in criterion_text for m in na_markers):
+                flagged.append(str(trial_id))
+                break
+    if not flagged:
+        return []
+    return [
+        _issue(
+            "N_A_INFERENCE_ERROR",
+            "high",
+            (
+                "Criteria marked as not applicable appear to have been inferred as MEETS/FAILS in "
+                f"trial(s): {flagged[:5]}."
+            ),
+        )
+    ]
+
+
+def _check_duplicate_missing_info(scored_trials: list[dict[str, Any]]) -> list[QAIssue]:
+    trials_with_duplicates: list[str] = []
+    for trial in scored_trials:
+        cleaned: list[str] = []
+        for item in trial.get("critical_missing_info", []) or []:
+            if isinstance(item, dict):
+                key = (
+                    str(item.get("field_id") or item.get("field") or item.get("display_name") or "")
+                    .strip()
+                    .lower()
+                )
+                if key:
+                    cleaned.append(key)
+                continue
+            value = str(item).strip().lower()
+            if value:
+                cleaned.append(value)
+        if cleaned and len(cleaned) != len(set(cleaned)):
+            trials_with_duplicates.append(str(trial.get("trial_id", "")))
+    if not trials_with_duplicates:
+        return []
+    return [
+        _issue(
+            "DUPLICATE_MISSING_INFO",
+            "medium",
+            (
+                "Duplicate critical_missing_info entries detected in trial(s): "
+                f"{trials_with_duplicates[:5]}. Deduplicate before synthesis."
+            ),
+        )
+    ]
+
+
+def _check_not_applicable_leakage(scored_trials: list[dict[str, Any]]) -> list[QAIssue]:
+    flagged: list[str] = []
+    for trial in scored_trials:
+        for item in trial.get("critical_missing_info", []) or []:
+            text = str(item).strip().lower()
+            if text and any(marker in text for marker in _NOT_APPLICABLE_MARKERS):
+                flagged.append(str(trial.get("trial_id", "")))
+                break
+    if not flagged:
+        return []
+    return [
+        _issue(
+            "N_A_LEAKAGE_IN_GAPS",
+            "high",
+            (
+                "Not-applicable items leaked into critical_missing_info in trial(s): "
+                f"{flagged[:5]}. Suppress these from information gaps and actions."
+            ),
+        )
+    ]
+
+
+def _check_generic_biomarker_inference(scored_trials: list[dict[str, Any]]) -> list[QAIssue]:
+    flagged: list[str] = []
+    for trial in scored_trials:
+        texts = [
+            str(trial.get("key_concern", "")),
+            str(trial.get("rationale", "")),
+            *[str(item) for item in trial.get("critical_missing_info", []) or []],
+        ]
+        for text in texts:
+            lowered = text.lower()
+            if "biomarker" not in lowered:
+                continue
+            if not any(marker in lowered for marker in _KNOWN_BIOMARKERS):
+                flagged.append(str(trial.get("trial_id", "")))
+                break
+    if not flagged:
+        return []
+    return [
+        _issue(
+            "GENERIC_BIOMARKER_INFERENCE",
+            "high",
+            (
+                "Generic biomarker language without specific marker detected in trial(s): "
+                f"{flagged[:5]}. Use marker-specific evidence where possible."
+            ),
+        )
+    ]
+
+
+def _check_summary_language_vs_critical_gaps(scored_trials: list[dict[str, Any]]) -> list[QAIssue]:
+    flagged: list[str] = []
+    for trial in scored_trials:
+        missing = [
+            str(item).strip()
+            for item in trial.get("critical_missing_info", []) or []
+            if str(item).strip()
+        ]
+        if not missing:
+            continue
+        narrative = " ".join(
+            [
+                str(trial.get("key_concern", "")),
+                str(trial.get("rationale", "")),
+            ]
+        ).lower()
+        if any(phrase in narrative for phrase in _NO_CONCERN_PHRASES):
+            flagged.append(str(trial.get("trial_id", "")))
+    if not flagged:
+        return []
+    return [
+        _issue(
+            "EXEC_SUMMARY_CONTRADICTS_CRITICAL_GAPS",
+            "high",
+            (
+                "Reassuring language conflicts with critical missing information in trial narrative(s): "
+                f"{flagged[:5]}."
+            ),
+        )
+    ]

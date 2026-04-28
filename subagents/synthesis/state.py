@@ -32,6 +32,8 @@ class SynthesisOutput(TypedDict):
     report_json: dict[str, Any] | None
     report_text: str | None
     synthesis_needs_re_evaluation: bool  # signal to supervisor
+    synthesis_retry_retrieval: bool
+    qa_remediation: dict[str, Any]
     decision_history: list[str]  # NEW entries only (parent accumulates)
     errors: list[str]  # new errors (parent accumulates)
 
@@ -59,5 +61,9 @@ class SynthesisState(TypedDict):
     report_json: dict[str, Any] | None
     report_text: str | None
     synthesis_needs_re_evaluation: bool
+    synthesis_retry_retrieval: bool
+    qa_remediation: dict[str, Any] | None
+    qa_unresolved_issues: list[QAIssue]
+    qa_remediation_actions: Annotated[list[dict[str, str]], operator.add]
     new_decision_entries: Annotated[list[str], operator.add]  # internal accumulator
     new_errors: Annotated[list[str], operator.add]  # internal accumulator

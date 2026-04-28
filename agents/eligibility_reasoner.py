@@ -5,7 +5,7 @@ from loguru import logger
 from models.judge_verdict import JudgeVerdict
 from tools.retry import llm_retry
 
-from clinical_trial_agent.config import get_llm
+from clinical_trial_agent.config import TIER_ORDER, get_llm
 
 from .eligibility_fallback import FALLBACK_VERDICT, fallback_verdict_for_exception, validate_verdict
 from .eligibility_prompt_builder import build_judge_messages
@@ -108,10 +108,17 @@ def _build_batch_result(
     meets_count, fails_count, uncertain_count, hard_exclusion_failures = _summarize_verdict_counts(
         verdicts
     )
+    adjusted_tier, adjusted_score = _apply_sparse_evidence_caps(
+        verdict=verdict,
+        meets_count=meets_count,
+        fails_count=fails_count,
+        uncertain_count=uncertain_count,
+        hard_exclusion_failures=hard_exclusion_failures,
+    )
     return {
         "trial_id": trial_id,
-        "match_score": verdict.match_score,
-        "match_tier": verdict.match_tier,
+        "match_score": adjusted_score,
+        "match_tier": adjusted_tier,
         "major_criteria_assessable": verdict.major_criteria_assessable,
         "critical_missing_info": verdict.critical_missing_info,
         "key_concern": verdict.key_concern,
@@ -122,6 +129,40 @@ def _build_batch_result(
         "uncertain_count": uncertain_count,
         "hard_exclusion_failures": hard_exclusion_failures,
     }
+
+
+def _apply_sparse_evidence_caps(
+    *,
+    verdict: JudgeVerdict,
+    meets_count: int,
+    fails_count: int,
+    uncertain_count: int,
+    hard_exclusion_failures: int,
+) -> tuple[str, float]:
+    if hard_exclusion_failures > 0:
+        return "disqualified", 0.0
+
+    tier = verdict.match_tier
+    score = verdict.match_score
+    assessed_count = meets_count + fails_count
+    total_count = assessed_count + uncertain_count
+
+    if total_count == 0:
+        if TIER_ORDER[tier] > TIER_ORDER["weak"]:
+            tier = "weak"
+        return tier, min(score, 0.25)
+
+    if assessed_count <= 1:
+        if TIER_ORDER[tier] > TIER_ORDER["weak"]:
+            tier = "weak"
+        return tier, min(score, 0.45)
+
+    if assessed_count < 3 or (assessed_count / total_count) < 0.5:
+        if TIER_ORDER[tier] > TIER_ORDER["moderate"]:
+            tier = "moderate"
+        return tier, min(score, 0.65)
+
+    return tier, score
 
 
 async def evaluate_criteria_batch(

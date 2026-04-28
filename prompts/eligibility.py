@@ -15,7 +15,8 @@ RULES
 - If any major criterion is not assessable, set major_criteria_assessable=false, match_score<=0.65, and do not use tier "strong".
 - If two or more major criteria are uncertain, set match_score<=0.55 and do not use tier "strong".
 - If >50% of criteria are uncertain, do not use tier "strong"; prefer "moderate" when no clear failures are present.
-- "strong" requires no triggered exclusions, no uncertain exclusions, and minimal uncertainty on major criteria.
+- "strong" requires ALL of: no triggered exclusions, no uncertain exclusions, major_criteria_assessable=true, at least one major criterion clearly met, and a minimum evidence floor (>=3 assessed criteria).
+- Do not assign high score/high tier when evidence is sparse; cap to moderate/weak when only a small number of criteria are assessable.
 - Be conservative, but avoid unnecessary downgrades when available evidence supports a moderate match.
 
 OUTPUT

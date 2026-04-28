@@ -98,6 +98,14 @@ async def test_audit_feedback_and_erase(
             model_version="gpt-4",
             consent_flag=True,
         )
+        audit_insert_call = next(
+            call
+            for call in mock_connection.execute.call_args_list
+            if "INSERT INTO pipeline_audit_log" in call.args[0]
+        )
+        audit_insert_args = audit_insert_call.args
+        assert isinstance(audit_insert_args[6], str)
+        assert audit_insert_args[6] == '{"tier1": 5}'
         await mem.save_feedback(
             patient_profile={"age": 50},
             run_id="run-123",
@@ -123,6 +131,22 @@ async def test_audit_feedback_and_erase(
     async with EpisodicMemory() as mem:
         audits = await mem.list_pipeline_audit("abc123")
         assert audits[0]["run_id"] == "run-123"
+        assert audits[0]["outcome_tier_counts"] == {"tier1": 5}
+
+    mock_connection.fetch.return_value = [
+        {
+            "profile_hash": "abc123",
+            "run_id": "run-legacy",
+            "timestamp": now,
+            "outcome_tier_counts": '{"tier2": 3}',
+            "model_version": "gpt-4",
+            "consent_flag": True,
+        }
+    ]
+    async with EpisodicMemory() as mem:
+        audits = await mem.list_pipeline_audit("abc123")
+        assert audits[0]["run_id"] == "run-legacy"
+        assert audits[0]["outcome_tier_counts"] == {"tier2": 3}
 
     mock_connection.fetch.return_value = [
         {

@@ -27,6 +27,13 @@ def _ctgov_headers() -> dict[str, str]:
     return {"User-Agent": settings.ctgov_user_agent, "Accept": settings.ctgov_accept}
 
 
+def _ctgov_proxy_headers() -> dict[str, str]:
+    token = get_settings().ctgov_proxy_token.get_secret_value().strip()
+    if not token:
+        return {}
+    return {"X-Proxy-Token": token}
+
+
 class ToolError(BaseModel):
     type: str
     message: str
@@ -82,7 +89,12 @@ async def _request_with_transport(
 
     if has_phi and proxy_url:
         payload = {"endpoint": url, "params": params}
-        return await client.post(proxy_url, json=payload, timeout=request_timeout)
+        return await client.post(
+            proxy_url,
+            json=payload,
+            timeout=request_timeout,
+            headers=_ctgov_proxy_headers(),
+        )
 
     if has_phi and not proxy_url:
         raise ClinicalTrialsClientError(
@@ -156,6 +168,8 @@ async def _request_json_with_retry(url: str, params: dict[str, Any]) -> dict[str
     retries = max(1, settings.ctgov_retry_attempts)
     timeout = httpx.Timeout(30.0)
     backoff = max(1.0, settings.ctgov_retry_backoff_base)
+    has_phi = _contains_phi_params(params)
+    proxy_url = settings.ctgov_proxy_url
 
     async with httpx.AsyncClient(timeout=timeout, headers=_ctgov_headers()) as client:
         for attempt in range(retries):
@@ -165,6 +179,11 @@ async def _request_json_with_retry(url: str, params: dict[str, Any]) -> dict[str
                 logger.warning("CT.gov request error on attempt {}: {}", attempt + 1, exc)
                 if await _sleep_before_retry(attempt, backoff, retries):
                     continue
+                if has_phi and proxy_url:
+                    raise ClinicalTrialsClientError(
+                        f"ClinicalTrials proxy unavailable at {proxy_url}",
+                        retryable=True,
+                    ) from exc
                 raise ClinicalTrialsClientError(
                     "ClinicalTrials.gov request failed due to connection or DNS error",
                     retryable=True,
