@@ -409,7 +409,6 @@ dependencies = [
     { name = "opentelemetry-sdk" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
-    { name = "pytest" },
     { name = "rich" },
     { name = "scispacy" },
     { name = "spacy" },
@@ -418,7 +417,7 @@ dependencies = [
     { name = "uvicorn" },
 ]
 
-[package.optional-dependencies]
+[package.dev-dependencies]
 dev = [
     { name = "bandit" },
     { name = "detect-secrets" },
@@ -433,18 +432,11 @@ dev = [
     { name = "vulture" },
 ]
 
-[package.dev-dependencies]
-dev = [
-    { name = "vulture" },
-]
-
 [package.metadata]
 requires-dist = [
     { name = "async-typer", specifier = ">=0.0.5" },
     { name = "asyncpg", specifier = ">=0.30.0" },
-    { name = "bandit", marker = "extra == 'dev'", specifier = ">=1.7.5" },
     { name = "cryptography", specifier = ">=46.0.7" },
-    { name = "detect-secrets", marker = "extra == 'dev'", specifier = ">=1.5.0" },
     { name = "diskcache", specifier = ">=5.6.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "httpx", specifier = ">=0.27.0" },
@@ -459,33 +451,34 @@ requires-dist = [
     { name = "langsmith", specifier = ">=0.7.31" },
     { name = "lizard", specifier = ">=1.22.1" },
     { name = "loguru", specifier = ">=0.7.2" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10.0" },
     { name = "nltk", specifier = ">=3.9.1" },
     { name = "openai", specifier = ">=1.45.0" },
     { name = "opentelemetry-exporter-otlp", specifier = ">=1.27.0" },
     { name = "opentelemetry-sdk", specifier = ">=1.27.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pydantic-settings", specifier = ">=2.6.0" },
-    { name = "pytest", specifier = ">=9.0.3" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0.0" },
-    { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.14.0" },
-    { name = "radon", marker = "extra == 'dev'", specifier = ">=6.0.1" },
-    { name = "respx", marker = "extra == 'dev'", specifier = ">=0.21.0" },
     { name = "rich", specifier = ">=13.0.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.8" },
     { name = "scispacy", specifier = ">=0.5.5" },
     { name = "spacy", specifier = ">=3.7.5" },
     { name = "tenacity", specifier = ">=8.0.0" },
     { name = "typer", specifier = ">=0.12.0" },
     { name = "uvicorn", specifier = ">=0.30.0" },
-    { name = "vulture", marker = "extra == 'dev'", specifier = ">=2.11" },
 ]
-provides-extras = ["dev"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "vulture", specifier = ">=2.16" }]
+dev = [
+    { name = "bandit", specifier = ">=1.7.5" },
+    { name = "detect-secrets", specifier = ">=1.5.0" },
+    { name = "mypy", specifier = ">=1.10.0" },
+    { name = "pytest", specifier = ">=9.0.3" },
+    { name = "pytest-asyncio", specifier = ">=0.23.0" },
+    { name = "pytest-cov", specifier = ">=5.0.0" },
+    { name = "pytest-mock", specifier = ">=3.14.0" },
+    { name = "radon", specifier = ">=6.0.1" },
+    { name = "respx", specifier = ">=0.21.0" },
+    { name = "ruff", specifier = ">=0.15.8" },
+    { name = "vulture", specifier = ">=2.16" },
+]
 
 [[package]]
 name = "cloudpathlib"

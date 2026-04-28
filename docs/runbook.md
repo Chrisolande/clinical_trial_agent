@@ -6,7 +6,7 @@ This is the single copy-paste flow for local development and CI parity.
 
 ```bash
 cd .
-uv sync --locked --dev
+uv sync --locked --group dev
 ```
 
 ## 2) Validate environment

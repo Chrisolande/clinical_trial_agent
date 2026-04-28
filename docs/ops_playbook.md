@@ -4,7 +4,7 @@
 
 ```bash
 cd .
-uv sync --locked --dev
+uv sync --locked --group dev
 uv run make check
 uv run pytest --cov --cov-report=term --cov-fail-under=75
 ```

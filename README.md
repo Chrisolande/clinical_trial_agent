@@ -137,7 +137,7 @@ This repository includes a ready-to-use dev container:
 - `.devcontainer/devcontainer.json`
 - `.devcontainer/docker-compose.yml`
 
-It starts an app container plus PostgreSQL and runs `uv sync --dev` on create, so local VS Code Dev Containers and GitHub Codespaces use the same test/lint environment.
+It starts an app container plus PostgreSQL and runs `uv sync --group dev` on create, so local VS Code Dev Containers and GitHub Codespaces use the same test/lint environment.
 
 ## Docker CI weekly push
 

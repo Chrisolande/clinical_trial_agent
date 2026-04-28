@@ -13,7 +13,7 @@
   "features": {
     "ghcr.io/devcontainers/features/uv:1": {}
   },
-  "postCreateCommand": "uv sync --dev --frozen",
+  "postCreateCommand": "uv sync --frozen --group dev",
   "forwardPorts": [
     5432
   ],

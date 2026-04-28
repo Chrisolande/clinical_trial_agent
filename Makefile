@@ -1,26 +1,26 @@
 .PHONY: lint typecheck test security complexity check fix docker-build docker-up docker-down docker-logs docker-ps docker-recreate
 
 lint:
-	ruff check .
-	ruff format --check .
+	uv run ruff check .
+	uv run ruff format --check .
 
 typecheck:
-	mypy .
+	uv run mypy .
 
 test:
-	pytest
+	uv run pytest
 
 security:
-	bandit -r . -ll
+	uv run bandit -r . -ll
 
 complexity:
-	radon cc --min B .
+	uv run radon cc --min B .
 
 check: lint typecheck test security complexity
 
 fix:
-	ruff format .
-	ruff check --fix .
+	uv run ruff format .
+	uv run ruff check --fix .
 
 # Docker helpers
 docker-build:

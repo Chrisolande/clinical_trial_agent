@@ -41,7 +41,7 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
       - name: Install dev dependencies
-        run: uv sync --locked --dev
+        run: uv sync --locked --group dev
       - name: Run lint targets
         run: |
           uv run make lint
@@ -88,7 +88,7 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
       - name: Install dependencies
-        run: uv sync --locked --dev
+        run: uv sync --locked --group dev
       - name: Run tests with coverage
         run: uv run pytest --cov --cov-report=xml --cov-fail-under=${{ env.QUALITY_COVERAGE_MIN }}
       - name: Upload coverage to Codecov
@@ -112,7 +112,7 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
       - name: Install dev dependencies
-        run: uv sync --locked --dev
+        run: uv sync --locked --group dev
       - name: Enforce secret scanning baseline policy # pragma: allowlist secret
         run: |
           python - <<'PY'
@@ -143,7 +143,7 @@ jobs:
           print("Secret scanning baseline policy check passed.")  # pragma: allowlist secret
           PY
       - name: Secret scan (fail closed) # pragma: allowlist secret
-        run: detect-secrets-hook --baseline .secrets.baseline $(git ls-files) # pragma: allowlist secret
+        run: uv run detect-secrets-hook --baseline .secrets.baseline $(git ls-files) # pragma: allowlist secret
       - name: Verify fail-closed CI env hardening consistency
         run: | # pragma: allowlist secret
           python - <<'PY'
@@ -293,6 +293,6 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
       - name: Install dependencies
-        run: uv sync --locked --dev
+        run: uv sync --locked --group dev
       - name: Run integration tests
         run: uv run pytest -m integration --maxfail=1 -q
