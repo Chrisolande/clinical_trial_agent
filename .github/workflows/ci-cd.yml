@@ -41,12 +41,13 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
       - name: Install dev dependencies
-        run: uv sync --locked --group dev
+        run: uv sync --locked --all-groups
       - name: Run lint targets
         run: |
-          uv run make lint
-          uv run make typecheck
-          uv run make complexity
+          uv run --all-groups ruff check .
+          uv run --all-groups ruff format --check .
+          uv run --all-groups mypy .
+          uv run --all-groups radon cc --min B .
 
   test:
     name: Tests (py${{ matrix.python-version }})
@@ -88,9 +89,9 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
       - name: Install dependencies
-        run: uv sync --locked --group dev
+        run: uv sync --locked --all-groups
       - name: Run tests with coverage
-        run: uv run pytest --cov --cov-report=xml --cov-fail-under=${{ env.QUALITY_COVERAGE_MIN }}
+        run: uv run --all-groups pytest --cov --cov-report=xml --cov-fail-under=${{ env.QUALITY_COVERAGE_MIN }}
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.13'
         uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
@@ -112,7 +113,7 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
       - name: Install dev dependencies
-        run: uv sync --locked --group dev
+        run: uv sync --locked --all-groups
       - name: Enforce secret scanning baseline policy # pragma: allowlist secret
         run: |
           python - <<'PY'
@@ -143,7 +144,7 @@ jobs:
           print("Secret scanning baseline policy check passed.")  # pragma: allowlist secret
           PY
       - name: Secret scan (fail closed) # pragma: allowlist secret
-        run: uv run detect-secrets-hook --baseline .secrets.baseline $(git ls-files) # pragma: allowlist secret
+        run: uv run --all-groups detect-secrets-hook --baseline .secrets.baseline $(git ls-files) # pragma: allowlist secret
       - name: Verify fail-closed CI env hardening consistency
         run: | # pragma: allowlist secret
           python - <<'PY'
@@ -179,7 +180,7 @@ jobs:
           print("CI fail-closed env hardening consistency check passed.")
           PY
       - name: Run security checks
-        run: uv run make security
+        run: uv run --all-groups bandit -r . -ll
 
   build-and-push:
     name: Build Docker image and push (main/tags)
@@ -293,6 +294,6 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
       - name: Install dependencies
-        run: uv sync --locked --group dev
+        run: uv sync --locked --all-groups
       - name: Run integration tests
-        run: uv run pytest -m integration --maxfail=1 -q
+        run: uv run --all-groups pytest -m integration --maxfail=1 -q
