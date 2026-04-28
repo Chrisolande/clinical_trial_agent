@@ -1,24 +1,26 @@
 # Clinical Trial Agent
 
-[![License](https://img.shields.io/github/license/Chrisolande/clinical_trial_agent)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/Chrisolande/clinical_trial_agent/ci-cd.yml?branch=main)](https://github.com/Chrisolande/clinical_trial_agent/actions)
 [![codecov](https://img.shields.io/codecov/c/github/Chrisolande/clinical_trial_agent)](https://codecov.io/gh/Chrisolande/clinical_trial_agent)
+[![License](https://img.shields.io/github/license/Chrisolande/clinical_trial_agent)](LICENSE)
 
-Async multi-agent clinical trial matching built with **LangGraph**.
+Async, multi-agent clinical trial matching built with **LangGraph**.
 
-The pipeline takes a patient profile, retrieves candidate studies from ClinicalTrials.gov, evaluates eligibility, and synthesizes a ranked report for clinical review.
+The pipeline takes a patient profile, retrieves candidate studies from ClinicalTrials.gov, evaluates eligibility, and produces a ranked report for clinical review. It also includes PostgreSQL-backed episodic memory, cached verdicts, and fail-closed safety controls for clinical-data workflows.
 
 > [!WARNING]
-> This project is **not certified for real patient care workflows** without additional compliance, legal, and security review.
+> This project is **not certified for real patient care workflows**. Use it only after the appropriate clinical, legal, security, and compliance review.
 
-## What it does
+## Highlights
 
-- Retrieves trials from ClinicalTrials.gov
-- Scores trial-patient fit (`strong`, `moderate`, `weak`, `disqualified`)
-- Produces human-readable and JSON outputs
-- Persists episodic memory and cache data in PostgreSQL
+- LangGraph orchestration with retrieval, eligibility, and synthesis subgraphs
+- CLI for full runs, search-only queries, environment validation, and memory operations
+- Ranked trial tiers: `strong`, `moderate`, `weak`, `disqualified`
+- PostgreSQL-backed memory and cache layers
+- Fail-closed consent, tenant, facility, and secret-scanning guardrails
+- Rich text and JSON report output
 
-## Architecture
+## How It Works
 
 ```mermaid
 flowchart TD
@@ -33,122 +35,140 @@ flowchart TD
     SYN --> OUT[Report JSON + Text]
 ```
 
-See `docs/architecture.mermaid` for the maintained source diagram and
-`docs/architecture.md`
-for the refreshed runtime/security data-flow notes.
+The maintained architecture and data-flow notes live in [`docs/architecture.mermaid`](docs/architecture.mermaid).
+
+## What You Can Do
+
+- Search ClinicalTrials.gov from the CLI
+- Run an end-to-end matching pipeline from a patient profile file
+- Validate environment and fail-closed runtime settings
+- Persist episodic memory, feedback, and cache entries in PostgreSQL
+- Inspect the LangGraph app locally with the dev server
 
 ## Requirements
 
-- Python 3.11+
-- PostgreSQL 16+
-- `uv` (recommended)
-- `scispacy` + `spacy` (installed via project dependencies)
-- `nltk` stopwords corpus (`python -m nltk.downloader stopwords`)
+- Python 3.11 through 3.13
+- `uv`
+- PostgreSQL 16+ for memory and cache-backed workflows
+- `nltk` stopwords corpus
+- A configured LLM provider key for the provider you use
 
-## Quick start
+## Quick Start
 
 ```bash
 git clone https://github.com/Chrisolande/clinical_trial_agent.git
 cd clinical_trial_agent
+uv sync --locked --group dev
 docker compose up db
-uv sync
 ```
 
-Validate environment before first run:
+Run the environment check before the first pipeline execution:
 
 ```bash
-uv run python -m clinical_trial_agent.validate_env
-# or
 uv run clinical-trial-agent validate-env
 ```
 
+> [!TIP]
+> The repo ships with a dev container, so VS Code Dev Containers and GitHub Codespaces can use the same `uv sync --group dev` setup.
+
 ## Configuration
 
-Minimum required environment variables:
+Set the required environment variables before running the pipeline:
 
 ```bash
 DEEPSEEK_API_KEY=your-key
 DATABASE_URI=postgresql://postgres:postgres@localhost:5432/postgres
 MEMORY_DB_DSN=postgresql://postgres:postgres@localhost:5432/postgres
 PROFILE_HASH_SALT=your-salt
-DB_ENCRYPTION_KEY=base64-32-byte-key
+DB_ENCRYPTION_KEY=base64-encoded-32-byte-key
 TENANT_ID=your-tenant
 FACILITY_ID=your-facility
 CLINICAL_DATA_EXTERNAL_LLM_CONSENT=false
 CTGOV_TRANSPORT_MODE=get
-# Optional: route PHI-bearing retrieval via internal proxy/tokenized path
+```
+
+Optional retrieval settings:
+
+```bash
 CTGOV_PROXY_URL=https://your-internal-proxy/ctgov/search
-# Local development exception: http://localhost:8000/ctgov/search is also allowed
 ```
 
 > [!IMPORTANT]
-> `DATABASE_URI` and `MEMORY_DB_DSN` should point to the same database in default local setup.
+> `DATABASE_URI` and `MEMORY_DB_DSN` should point to the same database in the default local setup.
 
-## Security & operational controls
+## Usage
 
-- **PHI-safe retrieval transport**: when condition/intervention terms are present, retrieval is allowed only through `CTGOV_PROXY_URL` using a POST JSON envelope (no patient-derived URL query params). The proxy URL must be HTTPS in production; loopback HTTP (`http://localhost` / `http://127.0.0.1`) is allowed for local development, and missing proxy configuration fails closed.
-- **External LLM consent gate**: `config.get_llm()` enforces `CLINICAL_DATA_EXTERNAL_LLM_CONSENT=true` for external providers (`deepseek`, `openai`, `anthropic`) on PHI-bearing calls; this is fail-closed.
-- **QA fail-closed**: QA emits structured issues (`code`, `severity`, `message`) and blocks report generation on critical findings.
-- **Deterministic medication safety**: known contraindications and malformed medication inputs disqualify affected trials.
-- **Tenant/facility governance**: memory/audit/feedback access fails closed unless `TENANT_ID` and `FACILITY_ID` are explicitly configured (non-default, non-empty).
-- **CI fail-closed guardrails**: CI enforces `detect-secrets` baseline policy (`.secrets.baseline` verification filter) and runs secret scanning plus env hardening consistency checks for consent and tenant/facility defaults.
-
-
-## CLI usage
+### Full pipeline
 
 ```bash
-# Full pipeline
 uv run clinical-trial-agent run ./patient_profile.json
+```
 
-# Search only
+### Search ClinicalTrials.gov
+
+```bash
 uv run clinical-trial-agent search --condition "non-small cell lung cancer"
+```
 
-# Memory operations
+### Validate the environment
+
+```bash
+uv run clinical-trial-agent validate-env
+```
+
+### Inspect episodic memory
+
+```bash
 uv run clinical-trial-agent memory list
 uv run clinical-trial-agent memory purge
 uv run clinical-trial-agent memory invalidate ./patient_profile.json
 ```
 
-## Terminology parsing and filtering
+## Output
 
-- Condition term expansion uses **scispaCy/spaCy** when a scientific model is available (`SCISPACY_MODEL`, default tries `en_core_sci_sm`, then `en_core_sci_md`).
-- Token filtering uses **NLTK English stopwords** (no hardcoded stopword list).
-- If scispaCy model or NLTK corpus is unavailable, the pipeline falls back to deterministic legacy expansion and continues safely.
+The pipeline produces:
 
-## Development workflow
+- A ranked report in text form
+- A structured JSON report
+- Trial tiers and eligibility verdict details
+- Information gaps and QA issues
+- Retrieval errors and remediation context when applicable
+
+## Safety and Guardrails
+
+- PHI-bearing retrieval uses a fail-closed transport policy
+- External LLM calls require explicit consent when PHI is involved
+- QA checks can block synthesis on critical inconsistencies
+- Medication safety rules disqualify trials with known contraindications
+- Tenant and facility defaults are rejected in runtime checks and CI
+- Secret scanning is enforced in CI with a tracked baseline
+
+## Development
 
 ```bash
 make check
 ```
 
-`make check` runs linting, type-checking, tests, security checks, and complexity checks.
+This runs linting, type checking, tests, security checks, and complexity checks.
 
-Current repository coverage gate is **75%+**.
+Recommended local workflow:
 
-Canonical developer flow (setup → validate-env → check → run) is documented in
-`docs/runbook.md`.
-Copy-paste CI debugging and incident response commands are in
-`docs/ops_playbook.md`.
+```bash
+uv sync --locked --group dev
+uv run clinical-trial-agent validate-env
+uv run make check
+uv run clinical-trial-agent run ./patient_profile.json
+```
 
-## Dev container / Codespaces
+Coverage is gated at **75%** in CI.
 
-This repository includes a ready-to-use dev container:
+## Docker and Dev Containers
 
-- `.devcontainer/devcontainer.json`
-- `.devcontainer/docker-compose.yml`
+- `docker-compose.yml` starts the application and PostgreSQL locally
+- `.devcontainer/devcontainer.json` boots the same `uv`-based dev environment
+- The Docker image build uses the locked dependency set from `uv.lock`
 
-It starts an app container plus PostgreSQL and runs `uv sync --group dev` on create, so local VS Code Dev Containers and GitHub Codespaces use the same test/lint environment.
-
-## Docker CI weekly push
-
-`/.github/workflows/ci-cd.yml` includes a dedicated scheduled Docker publish job (`build-and-push-weekly`) that pushes:
-
-- `ghcr.io/<owner>/<repo>:weekly`
-- `ghcr.io/<owner>/<repo>:weekly-YYYYMMDD`
-
-This is separate from normal `main`/tag publish runs and uses pinned GitHub Actions SHAs plus Buildx cache scopes for more reliable weekly publishing.
-
-## LangGraph dev server
+## LangGraph Dev Server
 
 ```bash
 uv run langgraph dev --config langgraph.json --no-browser
@@ -161,27 +181,16 @@ Exported graphs:
 - `eligibility`
 - `synthesis`
 
-## Data flow note
-
-If Tavily enrichment is enabled, trial NCT IDs and titles may be sent to Tavily APIs. Review retention and compliance requirements before enabling this in sensitive environments.
-
-## Contributing
-
-Contributor process, branch conventions, lockfile workflow, and local quality expectations are documented in **[CONTRIBUTING.md](CONTRIBUTING.md)**.
-
-## Security
-
-Vulnerability reporting process, consent/data-flow expectations, and clinical-data safety boundaries are documented in **[SECURITY.md](SECURITY.md)**.
-
-## Project layout
+## Project Layout
 
 ```text
-agents/         Core orchestration and reasoning modules
-subagents/      retrieval/, eligibility/, synthesis/ graphs and nodes
-models/         Pydantic models
-tools/          Cache, retry, DB, validator, telemetry utilities
-prompts/        Prompt templates
-tests/          Unit + integration test suite
-clinical_trial_agent/cli.py          Typer CLI entrypoint
-clinical_trial_agent/memory.py       Episodic memory persistence
+agents/                    Orchestration and reasoning modules
+subagents/                 Retrieval, eligibility, and synthesis graphs
+models/                    Pydantic models
+prompts/                   Prompt templates
+tools/                     Cache, retry, DB, validation, and telemetry helpers
+clinical_trial_agent/      CLI, config, memory, and pipeline entrypoints
+tests/                     Unit and integration tests
 ```
+
+For runbooks and operational commands, see [`docs/runbook.md`](docs/runbook.md) and [`docs/ops_playbook.md`](docs/ops_playbook.md).
