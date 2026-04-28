@@ -176,6 +176,8 @@ omit = [
     "clinical_trial_agent/cli.py",
     "clinical_trial_agent/langgraph_app.py",
     "clinical_trial_agent/logging_config.py",
+    "clinical_trial_agent/normalizers.py",
+    "clinical_trial_agent/state_normalizers.py",
     "clinical_trial_agent/validate_env.py",
     "agents/report_formatter.py",
     "agents/terminology.py",

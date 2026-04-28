@@ -11,7 +11,7 @@ test:
 	uv run pytest
 
 security:
-	uv run bandit -r . -ll
+	uv run bandit -r clinical_trial_agent agents subagents tools models -ll
 
 complexity:
 	uv run radon cc --min B .

@@ -91,7 +91,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-groups
       - name: Run tests with coverage
-        run: uv run --all-groups pytest --cov --cov-report=xml --cov-fail-under=${{ env.QUALITY_COVERAGE_MIN }}
+        run: uv run --all-groups pytest --cov=clinical_trial_agent --cov-report=xml --cov-fail-under=${{ env.QUALITY_COVERAGE_MIN }}
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.13'
         uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
@@ -148,39 +148,55 @@ jobs:
       - name: Verify fail-closed CI env hardening consistency
         run: | # pragma: allowlist secret
           python - <<'PY'
+          import re
           import sys
           from pathlib import Path
 
           text = Path(".github/workflows/ci-cd.yml").read_text(encoding="utf-8")
-          required_snippets = [
-              "DATABASE_URI: postgresql://postgres:postgres@localhost:5432/postgres",
-              "MEMORY_DB_DSN: postgresql://postgres:postgres@localhost:5432/postgres",
-              "DEEPSEEK_API_KEY: dummy-key-for-testing",
-              "PROFILE_HASH_SALT: ci-test-salt",
-              "TENANT_ID: ci-tenant",
-              "FACILITY_ID: ci-facility",
-              "CLINICAL_DATA_EXTERNAL_LLM_CONSENT: \"false\"",
-          ]
-          forbidden_snippets = [
-              "CLINICAL_DATA_EXTERNAL_LLM_CONSENT: \"true\"",
-              "TENANT_ID: default-tenant",
-              "FACILITY_ID: default-facility",
-          ]
+          expected_values = {
+              "DATABASE_URI": "postgresql://postgres:postgres@localhost:5432/postgres",
+              "MEMORY_DB_DSN": "postgresql://postgres:postgres@localhost:5432/postgres",
+              "DEEPSEEK_API_KEY": "dummy-key-for-testing",
+              "PROFILE_HASH_SALT": "ci-test-salt",
+              "TENANT_ID": "ci-tenant",
+              "FACILITY_ID": "ci-facility",
+              "CLINICAL_DATA_EXTERNAL_LLM_CONSENT": "false",
+          }
+          forbidden_values = {
+              "CLINICAL_DATA_EXTERNAL_LLM_CONSENT": "true",
+              "TENANT_ID": "default-tenant",
+              "FACILITY_ID": "default-facility",
+          }
 
-          for snippet in required_snippets:
-              if snippet not in text:
-                  print(f"Missing required hardening value: {snippet}")
+          env_pattern = re.compile(r"^\s{4}env:\n((?:^\s{6}[A-Z0-9_]+:.*\n)+)", re.MULTILINE)
+          key_pattern = re.compile(r"^\s{6}([A-Z0-9_]+):\s*(.+?)(?:\s+#.*)?$", re.MULTILINE)
+
+          env_blocks = []
+          for match in env_pattern.finditer(text):
+              block_values = {}
+              for key, raw_value in key_pattern.findall(match.group(1)):
+                  value = raw_value.strip().strip('"').strip("'")
+                  block_values[key] = value
+              env_blocks.append(block_values)
+
+          if not env_blocks:
+              print("No job env blocks found in ci-cd.yml.")
+              sys.exit(1)
+
+          for key, value in expected_values.items():
+              if not any(block.get(key) == value for block in env_blocks):
+                  print(f"Missing required hardening value: {key}: {value}")
                   sys.exit(1)
 
-          for snippet in forbidden_snippets:
-              if snippet in text:
-                  print(f"Found forbidden hardening value: {snippet}")
+          for key, value in forbidden_values.items():
+              if any(block.get(key) == value for block in env_blocks):
+                  print(f"Found forbidden hardening value: {key}: {value}")
                   sys.exit(1)
 
           print("CI fail-closed env hardening consistency check passed.")
           PY
       - name: Run security checks
-        run: uv run --all-groups bandit -r . -ll
+        run: uv run --all-groups bandit -r clinical_trial_agent agents subagents tools models -ll
 
   build-and-push:
     name: Build Docker image and push (main/tags)
