@@ -36,10 +36,10 @@ repos:
 
   - repo: local
     hooks:
-
       - id: vulture
         name: vulture dead code
-        entry: uv run vulture
-        language: system
+        entry: vulture
+        language: python
+        additional_dependencies: ["vulture>=2.16"]
         pass_filenames: false
         files: ^(clinical_trial_agent|agents|subagents|tools|models)/

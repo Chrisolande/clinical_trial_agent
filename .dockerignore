@@ -16,4 +16,3 @@ build/
 .gitignore
 .idea
 .vscode
-uv.lock
