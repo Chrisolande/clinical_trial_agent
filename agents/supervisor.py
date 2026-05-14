@@ -1,5 +1,4 @@
 import contextlib
-import hashlib
 import inspect
 import json
 import os
@@ -61,12 +60,6 @@ def _apply_feedback_adjustments(
     for idx, trial in enumerate(adjusted, 1):
         trial["rank"] = idx
     return adjusted
-
-
-def _profile_hash_for_feedback(patient_profile: dict[str, Any]) -> str:
-    canonical = json.dumps(patient_profile, sort_keys=True, default=str)
-    salt = os.getenv("PROFILE_HASH_SALT", "")
-    return hashlib.sha256(f"{salt}::{canonical}".encode()).hexdigest()
 
 
 def _compute_tier_counts(scored_trials: list[dict[str, Any]]) -> dict[str, int]:
@@ -271,39 +264,14 @@ class SupervisorOrchestrator:
         synthesis: dict[str, Any] = {}
 
         for retry_count in range(max_attempts):
-            with trace_span(
-                "supervisor.run_retrieval",
-                run_id=thread_id,
+            eligibility = await self._run_retrieval_eligibility_attempt(
+                patient_profile,
+                thread_id=thread_id,
                 attempt=retry_count,
-                slo_ms=6000,
-            ):
-                raw_retrieval = await self.run_retrieval(
-                    patient_profile=patient_profile,
-                    retry_count=retry_count,
-                    thread_id=thread_id,
-                )
-            run_state.retrieval_result = self._compress_retrieval_output(raw_retrieval)
-
-            limited_trials = list(run_state.retrieval_result.get("trials_deduplicated", []))[
-                : settings.max_trials_for_eligibility
-            ]
-
-            with trace_span(
-                "supervisor.run_eligibility",
-                run_id=thread_id,
-                attempt=retry_count,
-                trial_count=len(limited_trials),
-                slo_ms=12000,
-            ):
-                eligibility = await self.run_eligibility(
-                    patient_profile=patient_profile,
-                    trials_deduplicated=limited_trials,
-                    eligibility_verdicts=None,
-                    thread_id=thread_id,
-                    attempt=retry_count,
-                )
-            run_state.scored_trials = self._compress_scored_trials(
-                list(eligibility.get("trial_scores", []))
+                run_state=run_state,
+                eligibility_verdicts=None,
+                retrieval_span="supervisor.run_retrieval",
+                eligibility_span="supervisor.run_eligibility",
             )
 
             if settings.one_pass_mode or not bool(
@@ -313,30 +281,19 @@ class SupervisorOrchestrator:
 
         feedback_rows: list[dict[str, Any]] = []
         if hasattr(memory, "list_feedback"):
-            feedback_rows = await memory.list_feedback(_profile_hash_for_feedback(patient_profile))
+            feedback_rows = await memory.list_feedback(patient_profile)
         adjusted_scores = _apply_feedback_adjustments(run_state.scored_trials, feedback_rows)
 
         for reeval_attempt in range(max_attempts):
             with trace_span("supervisor.run_synthesis", run_id=thread_id, slo_ms=6000):
-                synthesis_kwargs: dict[str, Any] = {
-                    "patient_profile": patient_profile,
-                    "trial_scores": adjusted_scores,
-                    "eligibility_verdicts": eligibility.get("eligibility_verdicts"),
-                    "missing_info_recommendations": eligibility.get("missing_info_recommendations"),
-                    "trials_raw": list(run_state.retrieval_result.get("trials_raw", [])),
-                    "search_queries": list(run_state.retrieval_result.get("search_queries", [])),
-                    "decision_history": self._compress_decision_history(
-                        list(eligibility.get("decision_history", []))
-                    ),
-                    "trials_with_criteria": eligibility.get("trials_with_criteria"),
-                    "thread_id": thread_id,
-                }
-                if "retrieval_errors" in inspect.signature(self.run_synthesis).parameters:
-                    synthesis_kwargs["retrieval_errors"] = list(
-                        run_state.retrieval_result.get("retrieval_errors", [])
-                    )
                 synthesis = await self.run_synthesis(
-                    **synthesis_kwargs,
+                    **self._build_synthesis_kwargs(
+                        patient_profile=patient_profile,
+                        adjusted_scores=adjusted_scores,
+                        eligibility=eligibility,
+                        run_state=run_state,
+                        thread_id=thread_id,
+                    ),
                 )
             run_state.final_result = self._unwrap_synthesis_result(synthesis)
             needs_re_eval = bool(run_state.final_result.get("synthesis_needs_re_evaluation", False))
@@ -349,43 +306,91 @@ class SupervisorOrchestrator:
             if reeval_attempt >= max_retries:
                 break
 
-            if needs_retrieval_retry:
-                with trace_span(
-                    "supervisor.remediation_retrieval_retry",
-                    run_id=thread_id,
-                    attempt=reeval_attempt + 1,
-                    slo_ms=6000,
-                ):
-                    raw_retrieval = await self.run_retrieval(
-                        patient_profile=patient_profile,
-                        retry_count=reeval_attempt + 1,
-                        thread_id=thread_id,
-                    )
-                run_state.retrieval_result = self._compress_retrieval_output(raw_retrieval)
-
-            limited_trials = list(run_state.retrieval_result.get("trials_deduplicated", []))[
-                : settings.max_trials_for_eligibility
-            ]
-            with trace_span(
-                "supervisor.remediation_eligibility_retry",
-                run_id=thread_id,
+            eligibility = await self._run_retrieval_eligibility_attempt(
+                patient_profile,
+                thread_id=thread_id,
                 attempt=reeval_attempt + 1,
-                trial_count=len(limited_trials),
-                slo_ms=12000,
-            ):
-                eligibility = await self.run_eligibility(
-                    patient_profile=patient_profile,
-                    trials_deduplicated=limited_trials,
-                    eligibility_verdicts=eligibility.get("eligibility_verdicts"),
-                    thread_id=thread_id,
-                    attempt=reeval_attempt + 1,
-                )
-            run_state.scored_trials = self._compress_scored_trials(
-                list(eligibility.get("trial_scores", []))
+                run_state=run_state,
+                eligibility_verdicts=eligibility.get("eligibility_verdicts"),
+                retrieval_span="supervisor.remediation_retrieval_retry",
+                eligibility_span="supervisor.remediation_eligibility_retry",
+                run_retrieval_first=needs_retrieval_retry,
             )
             adjusted_scores = _apply_feedback_adjustments(run_state.scored_trials, feedback_rows)
 
         return _normalize_supervisor_output(run_state.final_result)
+
+    async def _run_retrieval_eligibility_attempt(
+        self,
+        patient_profile: PatientSummary,
+        *,
+        thread_id: str,
+        attempt: int,
+        run_state: SupervisorRunState,
+        eligibility_verdicts: dict[str, dict[str, Any]] | None,
+        retrieval_span: str,
+        eligibility_span: str,
+        run_retrieval_first: bool = True,
+    ) -> dict[str, Any]:
+        settings = get_settings()
+        if run_retrieval_first:
+            with trace_span(retrieval_span, run_id=thread_id, attempt=attempt, slo_ms=6000):
+                raw_retrieval = await self.run_retrieval(
+                    patient_profile=patient_profile,
+                    retry_count=attempt,
+                    thread_id=thread_id,
+                )
+            run_state.retrieval_result = self._compress_retrieval_output(raw_retrieval)
+
+        limited_trials = list(run_state.retrieval_result.get("trials_deduplicated", []))[
+            : settings.max_trials_for_eligibility
+        ]
+        with trace_span(
+            eligibility_span,
+            run_id=thread_id,
+            attempt=attempt,
+            trial_count=len(limited_trials),
+            slo_ms=12000,
+        ):
+            eligibility = await self.run_eligibility(
+                patient_profile=patient_profile,
+                trials_deduplicated=limited_trials,
+                eligibility_verdicts=eligibility_verdicts,
+                thread_id=thread_id,
+                attempt=attempt,
+            )
+        run_state.scored_trials = self._compress_scored_trials(
+            list(eligibility.get("trial_scores", []))
+        )
+        return eligibility
+
+    def _build_synthesis_kwargs(
+        self,
+        *,
+        patient_profile: PatientSummary,
+        adjusted_scores: list[dict[str, Any]],
+        eligibility: dict[str, Any],
+        run_state: SupervisorRunState,
+        thread_id: str,
+    ) -> dict[str, Any]:
+        synthesis_kwargs: dict[str, Any] = {
+            "patient_profile": patient_profile,
+            "trial_scores": adjusted_scores,
+            "eligibility_verdicts": eligibility.get("eligibility_verdicts"),
+            "missing_info_recommendations": eligibility.get("missing_info_recommendations"),
+            "trials_raw": list(run_state.retrieval_result.get("trials_raw", [])),
+            "search_queries": list(run_state.retrieval_result.get("search_queries", [])),
+            "decision_history": self._compress_decision_history(
+                list(eligibility.get("decision_history", []))
+            ),
+            "trials_with_criteria": eligibility.get("trials_with_criteria"),
+            "thread_id": thread_id,
+        }
+        if "retrieval_errors" in inspect.signature(self.run_synthesis).parameters:
+            synthesis_kwargs["retrieval_errors"] = list(
+                run_state.retrieval_result.get("retrieval_errors", [])
+            )
+        return synthesis_kwargs
 
     @staticmethod
     def _unwrap_synthesis_result(result: Any) -> dict[str, Any]:
@@ -481,6 +486,10 @@ class SupervisorOrchestrator:
             "eligibility_criteria_raw": criteria_text,
             "locations": list(trial.get("locations", []))[:5],
             "primary_completion_date": str(trial.get("primary_completion_date", "")),
+            "criteria_source": str(trial.get("criteria_source", "missing")),
+            "criteria_source_verified": bool(trial.get("criteria_source_verified", False)),
+            "criteria_retrieved_at": str(trial.get("criteria_retrieved_at", "")),
+            "criteria_completeness": str(trial.get("criteria_completeness", "missing")),
         }
 
     def _compress_retrieval_output(self, retrieval: dict[str, Any]) -> dict[str, Any]:
@@ -527,6 +536,10 @@ class SupervisorOrchestrator:
             "key_exclusion_failed",
             "key_uncertain",
             "locations_summary",
+            "criteria_source",
+            "criteria_source_verified",
+            "criteria_retrieved_at",
+            "criteria_completeness",
         )
         return [{key: trial[key] for key in keep if trial.get(key) is not None} for trial in trials]
 
@@ -537,16 +550,13 @@ class SupervisorOrchestrator:
 
 @contextlib.asynccontextmanager
 async def compile_supervisor_graph() -> Any:
-    checkpointer = get_checkpointer(get_settings().database_uri)
-    if checkpointer is not None and hasattr(checkpointer, "__aenter__"):
-        async with checkpointer as active_checkpointer:
-            setup_result = active_checkpointer.setup()
-            if inspect.isawaitable(setup_result):
-                await setup_result
-            yield SupervisorOrchestrator(checkpointer=active_checkpointer)
-    else:
-        if checkpointer is not None and hasattr(checkpointer, "setup"):
-            setup_result = checkpointer.setup()
-            if inspect.isawaitable(setup_result):
-                await setup_result
+    checkpointer_cm = get_checkpointer(get_settings().database_uri)
+    if checkpointer_cm is None:
+        yield SupervisorOrchestrator(checkpointer=None)
+        return
+
+    async with checkpointer_cm as checkpointer:
+        setup_result = checkpointer.setup()
+        if inspect.isawaitable(setup_result):
+            await setup_result
         yield SupervisorOrchestrator(checkpointer=checkpointer)

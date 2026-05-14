@@ -156,6 +156,18 @@ class EpisodicMemory(MemoryAuditFeedbackMixin, PostgresBase):
             await conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_physician_feedback_tenant_facility ON physician_feedback (tenant_id, facility_id, created_at DESC)"
             )
+            await conn.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_patient_runs_tenant_facility_profile
+                ON patient_runs (tenant_id, facility_id, profile_hash)
+                """
+            )
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_physician_feedback_lookup
+                ON physician_feedback (tenant_id, facility_id, profile_hash, created_at DESC)
+                """
+            )
             row = await conn.fetchrow("SELECT version FROM schema_version LIMIT 1")
             current_version = int(row["version"]) if row and "version" in row else 0
 
@@ -183,6 +195,85 @@ class EpisodicMemory(MemoryAuditFeedbackMixin, PostgresBase):
                             WHEN pg_typeof(outcome_tier_counts)::text = 'jsonb' THEN outcome_tier_counts
                             ELSE outcome_tier_counts::text::jsonb
                         END
+                    """
+                )
+
+            if current_version < 8:
+                await conn.execute(
+                    """
+                    DO $$
+                    BEGIN
+                        ALTER TABLE patient_runs
+                        ADD CONSTRAINT patient_runs_tenant_nonempty
+                        CHECK (tenant_id IS NOT NULL AND tenant_id <> '') NOT VALID;
+                    EXCEPTION WHEN duplicate_object THEN NULL;
+                    END $$;
+                    """
+                )
+                await conn.execute(
+                    """
+                    DO $$
+                    BEGIN
+                        ALTER TABLE patient_runs
+                        ADD CONSTRAINT patient_runs_facility_nonempty
+                        CHECK (facility_id IS NOT NULL AND facility_id <> '') NOT VALID;
+                    EXCEPTION WHEN duplicate_object THEN NULL;
+                    END $$;
+                    """
+                )
+                await conn.execute(
+                    """
+                    DO $$
+                    BEGIN
+                        ALTER TABLE pipeline_audit_log
+                        ADD CONSTRAINT pipeline_audit_tenant_nonempty
+                        CHECK (tenant_id IS NOT NULL AND tenant_id <> '') NOT VALID;
+                    EXCEPTION WHEN duplicate_object THEN NULL;
+                    END $$;
+                    """
+                )
+                await conn.execute(
+                    """
+                    DO $$
+                    BEGIN
+                        ALTER TABLE pipeline_audit_log
+                        ADD CONSTRAINT pipeline_audit_facility_nonempty
+                        CHECK (facility_id IS NOT NULL AND facility_id <> '') NOT VALID;
+                    EXCEPTION WHEN duplicate_object THEN NULL;
+                    END $$;
+                    """
+                )
+                await conn.execute(
+                    """
+                    DO $$
+                    BEGIN
+                        ALTER TABLE physician_feedback
+                        ADD CONSTRAINT physician_feedback_tenant_nonempty
+                        CHECK (tenant_id IS NOT NULL AND tenant_id <> '') NOT VALID;
+                    EXCEPTION WHEN duplicate_object THEN NULL;
+                    END $$;
+                    """
+                )
+                await conn.execute(
+                    """
+                    DO $$
+                    BEGIN
+                        ALTER TABLE physician_feedback
+                        ADD CONSTRAINT physician_feedback_facility_nonempty
+                        CHECK (facility_id IS NOT NULL AND facility_id <> '') NOT VALID;
+                    EXCEPTION WHEN duplicate_object THEN NULL;
+                    END $$;
+                    """
+                )
+                await conn.execute(
+                    """
+                    DO $$
+                    BEGIN
+                        ALTER TABLE physician_feedback
+                        ADD CONSTRAINT physician_feedback_verdict_check
+                        CHECK (verdict IN ('confirmed', 'rejected')) NOT VALID;
+                    EXCEPTION WHEN duplicate_object THEN NULL;
+                    END $$;
                     """
                 )
 

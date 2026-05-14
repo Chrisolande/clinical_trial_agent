@@ -1,6 +1,7 @@
 import asyncio
 import itertools
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from functools import lru_cache
 from typing import Any
 
@@ -72,6 +73,10 @@ def _extract_snippet_from_response_items(response: Any) -> str | None:
 def _merge_trial_with_snippet(trial: dict[str, Any], snippet: str) -> dict[str, Any]:
     merged = dict(trial)
     merged["eligibility_criteria_raw"] = snippet
+    merged["criteria_source"] = "tavily_snippet"
+    merged["criteria_source_verified"] = False
+    merged["criteria_retrieved_at"] = datetime.now(UTC).isoformat()
+    merged["criteria_completeness"] = "partial"
     return merged
 
 

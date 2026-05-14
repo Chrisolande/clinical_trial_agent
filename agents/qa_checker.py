@@ -25,6 +25,25 @@ _NO_CONCERN_PHRASES = (
     "no significant concerns",
 )
 _NOT_APPLICABLE_MARKERS = ("not_applicable", "not applicable", "n/a", "non-applicable")
+_INTERNAL_LEAKAGE_PHRASES = (
+    "judge model",
+    "structured verdict",
+    "llm",
+    "parser",
+    "fallback",
+    "tool failed",
+    "qa issue",
+)
+_STRONG_OVERSTATEMENT_PHRASES = (
+    "fully meets all criteria",
+    "meets all criteria",
+    "all criteria met",
+    "no concerns",
+    "no major concerns",
+    "none identified",
+    "no significant concerns",
+)
+_LOW_PRIORITY_GAP_BLOAT_THRESHOLD = 5
 
 
 class QAIssue(TypedDict):
@@ -156,13 +175,50 @@ def _check_additional_quality_rules(
     scored_trials: list[dict[str, Any]],
 ) -> list[QAIssue]:
     issues: list[QAIssue] = []
+    issues.extend(_check_public_report_internal_leakage(scored_trials))
     issues.extend(_check_strong_too_few_criteria(scored_trials))
+    issues.extend(_check_strong_match_contradiction(scored_trials))
     issues.extend(_check_na_inference_errors(eligibility_verdicts))
     issues.extend(_check_duplicate_missing_info(scored_trials))
     issues.extend(_check_not_applicable_leakage(scored_trials))
     issues.extend(_check_generic_biomarker_inference(scored_trials))
+    issues.extend(_check_low_priority_gap_bloat(scored_trials))
     issues.extend(_check_summary_language_vs_critical_gaps(scored_trials))
     return issues
+
+
+def _trial_text_snippets(trial: dict[str, Any]) -> list[str]:
+    snippets: list[str] = [str(trial.get("key_concern", "")), str(trial.get("rationale", ""))]
+    for item in trial.get("critical_missing_info", []) or []:
+        if isinstance(item, dict):
+            snippets.extend(str(value) for value in item.values())
+        else:
+            snippets.append(str(item))
+    return [snippet for snippet in snippets if snippet.strip()]
+
+
+def _check_public_report_internal_leakage(scored_trials: list[dict[str, Any]]) -> list[QAIssue]:
+    flagged: list[str] = []
+    for trial in scored_trials:
+        lowered_snippets = [snippet.lower() for snippet in _trial_text_snippets(trial)]
+        if any(
+            phrase in snippet
+            for snippet in lowered_snippets
+            for phrase in _INTERNAL_LEAKAGE_PHRASES
+        ):
+            flagged.append(str(trial.get("trial_id", "")))
+    if not flagged:
+        return []
+    return [
+        _issue(
+            "PUBLIC_REPORT_INTERNAL_LEAKAGE",
+            "critical",
+            (
+                "Internal processing language leaked into report-facing narrative in trial(s): "
+                f"{flagged[:5]}."
+            ),
+        )
+    ]
 
 
 def _check_strong_too_few_criteria(scored_trials: list[dict[str, Any]]) -> list[QAIssue]:
@@ -182,6 +238,32 @@ def _check_strong_too_few_criteria(scored_trials: list[dict[str, Any]]) -> list[
             (
                 "Strong-tier trial(s) have too few assessed criteria (<3), which may overstate confidence: "
                 f"{flagged[:5]}."
+            ),
+        )
+    ]
+
+
+def _check_strong_match_contradiction(scored_trials: list[dict[str, Any]]) -> list[QAIssue]:
+    flagged: list[str] = []
+    for trial in scored_trials:
+        if str(trial.get("tier", "weak")) != "strong":
+            continue
+        uncertain = int(trial.get("uncertain_count", 0))
+        missing = [item for item in trial.get("critical_missing_info", []) or [] if str(item).strip()]
+        if uncertain <= 0 and not missing:
+            continue
+        narrative = f"{trial.get('key_concern', '')} {trial.get('rationale', '')}".lower()
+        if any(phrase in narrative for phrase in _STRONG_OVERSTATEMENT_PHRASES):
+            flagged.append(str(trial.get("trial_id", "")))
+    if not flagged:
+        return []
+    return [
+        _issue(
+            "STRONG_MATCH_CONTRADICTION",
+            "high",
+            (
+                "Strong match narrative overstates certainty despite unresolved uncertainty or gaps in "
+                f"trial(s): {flagged[:5]}."
             ),
         )
     ]
@@ -214,20 +296,8 @@ def _check_na_inference_errors(eligibility_verdicts: dict[str, dict[str, Any]]) 
 def _check_duplicate_missing_info(scored_trials: list[dict[str, Any]]) -> list[QAIssue]:
     trials_with_duplicates: list[str] = []
     for trial in scored_trials:
-        cleaned: list[str] = []
-        for item in trial.get("critical_missing_info", []) or []:
-            if isinstance(item, dict):
-                key = (
-                    str(item.get("field_id") or item.get("field") or item.get("display_name") or "")
-                    .strip()
-                    .lower()
-                )
-                if key:
-                    cleaned.append(key)
-                continue
-            value = str(item).strip().lower()
-            if value:
-                cleaned.append(value)
+        cleaned = [_missing_info_key(item) for item in trial.get("critical_missing_info", []) or []]
+        cleaned = [value for value in cleaned if value]
         if cleaned and len(cleaned) != len(set(cleaned)):
             trials_with_duplicates.append(str(trial.get("trial_id", "")))
     if not trials_with_duplicates:
@@ -242,6 +312,16 @@ def _check_duplicate_missing_info(scored_trials: list[dict[str, Any]]) -> list[Q
             ),
         )
     ]
+
+
+def _missing_info_key(item: Any) -> str:
+    if isinstance(item, dict):
+        return (
+            str(item.get("field_id") or item.get("field") or item.get("display_name") or "")
+            .strip()
+            .lower()
+        )
+    return str(item).strip().lower()
 
 
 def _check_not_applicable_leakage(scored_trials: list[dict[str, Any]]) -> list[QAIssue]:
@@ -322,6 +402,41 @@ def _check_summary_language_vs_critical_gaps(scored_trials: list[dict[str, Any]]
             (
                 "Reassuring language conflicts with critical missing information in trial narrative(s): "
                 f"{flagged[:5]}."
+            ),
+        )
+    ]
+
+
+def _check_low_priority_gap_bloat(scored_trials: list[dict[str, Any]]) -> list[QAIssue]:
+    flagged: list[str] = []
+    for trial in scored_trials:
+        low_priority_count = 0
+        for item in trial.get("critical_missing_info", []) or []:
+            if isinstance(item, dict):
+                priority = str(item.get("priority", "")).strip().lower()
+                if priority == "low":
+                    low_priority_count += 1
+                    continue
+                descriptor = " ".join(
+                    str(item.get(key, "")) for key in ("field_id", "field", "description")
+                ).lower()
+                if "low priority" in descriptor:
+                    low_priority_count += 1
+            else:
+                text = str(item).lower()
+                if "low priority" in text or text.endswith("(low)"):
+                    low_priority_count += 1
+        if low_priority_count >= _LOW_PRIORITY_GAP_BLOAT_THRESHOLD:
+            flagged.append(str(trial.get("trial_id", "")))
+    if not flagged:
+        return []
+    return [
+        _issue(
+            "LOW_PRIORITY_GAP_BLOAT",
+            "medium",
+            (
+                "Low-priority information gaps are excessively enumerated in trial(s): "
+                f"{flagged[:5]}. Consolidate low-priority gaps."
             ),
         )
     ]

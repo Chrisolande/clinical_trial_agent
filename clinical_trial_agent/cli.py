@@ -1,4 +1,7 @@
+import hashlib
+import hmac
 import json
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -27,6 +30,7 @@ from tools.cli_support import (
 from tools.cli_support import (
     with_memory as _with_memory,
 )
+from tools.ctgov_proxy_manager import ensure_proxy as _ensure_proxy
 from tools.errors import ClinicalTrialAgentError
 
 from clinical_trial_agent.clinical_trials import search_trials
@@ -61,10 +65,16 @@ async def run(
     webhook_url: str | None = typer.Option(
         None, "--webhook-url", help="Optional webhook callback URL"
     ),
+    allow_local_webhook: bool = typer.Option(
+        False,
+        "--allow-local-webhook",
+        help="Allow local/private webhook URLs for development only",
+    ),
     log_format: str = typer.Option("text", "--log-format", help="text or json"),
 ) -> None:
     configure_logging(log_format=log_format)
     try:
+        await _ensure_proxy()
         if input_format == "text":
             patient_profile = await _parse_profile_text(_load_text_profile(profile_path))
         else:
@@ -74,7 +84,7 @@ async def run(
         result = await _run_pipeline(patient_profile, thread_id, stream=stream, console=console)
 
         if webhook_url:
-            _validate_webhook_url(webhook_url)
+            _validate_webhook_url(webhook_url, allow_local=allow_local_webhook)
             payload = {
                 "run_id": thread_id,
                 "profile_hash": result.get("profile_hash", ""),
@@ -83,8 +93,22 @@ async def run(
                     "has_report_json": isinstance(result.get("report_json"), dict),
                 },
             }
+            body = json.dumps(payload, separators=(",", ":"), default=str).encode("utf-8")
+            headers: dict[str, str] = {}
+            signing_secret = os.getenv("WEBHOOK_SIGNING_SECRET", "")
+            if signing_secret:
+                digest = hmac.new(
+                    signing_secret.encode("utf-8"),
+                    body,
+                    hashlib.sha256,
+                ).hexdigest()
+                headers["X-Clinical-Trial-Agent-Signature"] = f"sha256={digest}"
             async with httpx.AsyncClient(timeout=15.0) as client:
-                response = await client.post(webhook_url, json=payload)
+                response = await client.post(
+                    webhook_url,
+                    content=body,
+                    headers={**headers, "Content-Type": "application/json"},
+                )
                 response.raise_for_status()
             console.print(f"Queued run with webhook delivery. run_id={thread_id}")
             return
@@ -104,6 +128,7 @@ async def search(
     condition: str | None = None, intervention: str | None = None, page_size: int = 10
 ) -> None:
     try:
+        await _ensure_proxy()
         with Progress(
             SpinnerColumn(), TextColumn("{task.description}"), console=console
         ) as progress:
@@ -224,6 +249,57 @@ async def validate_env() -> None:
             "TAVILY_MAX_TRIALS_TO_ENRICH", str(get_settings().tavily_max_trials_to_enrich)
         )
         console.print(table)
+    except HANDLED_EXCEPTIONS as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise SystemExit(1) from exc
+
+
+@app.async_command("eval-offline", help="Run offline evaluator on JSONL datasets.")
+async def eval_offline(
+    synthetic: Path = typer.Option(
+        Path("evaluation/data/synthetic_cases.jsonl"),
+        "--synthetic",
+        help="Path to synthetic cases JSONL",
+    ),
+    adversarial: Path = typer.Option(
+        Path("evaluation/data/adversarial_cases.jsonl"),
+        "--adversarial",
+        help="Path to adversarial cases JSONL",
+    ),
+    ranking: Path = typer.Option(
+        Path("evaluation/data/retrieval_ranking_cases.jsonl"),
+        "--ranking",
+        help="Path to ranking cases JSONL",
+    ),
+    out: Path = typer.Option(
+        Path("evaluation/reports/offline_eval_report.md"),
+        "--out",
+        help="Markdown output path",
+    ),
+    json_out: Path = typer.Option(
+        Path("evaluation/reports/offline_eval_metrics.json"),
+        "--json-out",
+        help="JSON output path",
+    ),
+) -> None:
+    from evaluation.runners.run_offline_eval import run_offline_evaluation_async
+
+    try:
+        with Progress(
+            SpinnerColumn(), TextColumn("{task.description}"), console=console
+        ) as progress:
+            progress.add_task("Running offline evaluation...", total=None)
+            result = await run_offline_evaluation_async(
+                synthetic_path=synthetic,
+                adversarial_path=adversarial,
+                ranking_path=ranking,
+                report_path=out,
+                json_path=json_out,
+            )
+        console.print(
+            f"Offline evaluation complete: status={result.get('overall_status')} "
+            f"report={out} metrics={json_out}"
+        )
     except HANDLED_EXCEPTIONS as exc:
         console.print(f"[red]{exc}[/red]")
         raise SystemExit(1) from exc

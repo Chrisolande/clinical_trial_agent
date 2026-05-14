@@ -1,10 +1,12 @@
 import asyncio
+import json
 import re
 from typing import Any, Literal
 
+from langchain_core.messages import BaseMessage
 from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
-from models.criteria import EligibilityCriterion, ParsedEligibilityCriterion
+from models.criteria import ParsedEligibilityCriterion
 from prompts.criteria_parser import build_criteria_parser_prompt
 from tools import cache
 from tools.retry import llm_retry
@@ -16,102 +18,131 @@ CriterionCategoryLiteral = Literal[
 ]
 
 _PROMPT: ChatPromptTemplate = ChatPromptTemplate.from_template(build_criteria_parser_prompt())
-_CATEGORY_KEYWORDS: tuple[tuple[CriterionCategoryLiteral, tuple[str, ...]], ...] = (
-    ("age", ("age", "year", "yo")),
-    ("biomarker", ("egfr", "braf", "alk", "pd-l1", "mutation", "biomarker")),
-    ("lab", ("creatinine", "bilirubin", "ast", "alt", "hemoglobin", "platelet", "wbc", "ldh")),
-    ("performance", ("ecog", "karnofsky", "performance")),
-    ("diagnosis", ("diagnosis", "histology", "pathology", "metastatic", "stage")),
-    ("medication", ("treatment", "therapy", "drug", "medication", "immunotherapy", "chemotherapy")),
+
+
+_JSON_REPAIR_PROMPT = ChatPromptTemplate.from_template(
+    """
+You are parsing clinical trial eligibility criteria.
+
+Return ONLY valid JSON. Do not return markdown. Do not explain.
+
+The JSON must match this schema exactly:
+
+{{
+  "inclusion_criteria": [
+    {{
+      "text": "criterion text",
+      "criterion_type": "inclusion",
+      "is_hard_exclusion": false,
+      "category": "age | lab | biomarker | diagnosis | medication | performance | other"
+    }}
+  ],
+  "exclusion_criteria": [
+    {{
+      "text": "criterion text",
+      "criterion_type": "exclusion",
+      "is_hard_exclusion": true,
+      "category": "age | lab | biomarker | diagnosis | medication | performance | other"
+    }}
+  ]
+}}
+
+Rules:
+- Preserve the original medical meaning.
+- Do not invent criteria.
+- Split compound criteria only when clearly separable.
+- Inclusion criteria must go under inclusion_criteria.
+- Exclusion criteria must go under exclusion_criteria.
+- If a section is absent, return an empty list for that section.
+- Categories must be one of: age, lab, biomarker, diagnosis, medication, performance, other.
+
+NCT ID:
+{nct_id}
+
+Eligibility criteria:
+{eligibility_criteria_raw}
+""".strip()
 )
 
 
-def _get_chain() -> Any:
+def _get_structured_chain() -> Any:
     """Build a fresh parser chain per call to avoid stale loop-bound transports."""
     return _PROMPT | get_llm().with_structured_output(ParsedEligibilityCriterion)
 
 
-def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
-    return any(keyword in text for keyword in keywords)
+def _get_json_chain() -> Any:
+    """Fallback LLM parser that asks for raw JSON instead of tool/structured output."""
+    return _JSON_REPAIR_PROMPT | get_llm()
 
 
-def _infer_category(text: str) -> CriterionCategoryLiteral:
-    lowered = text.lower()
-    for category, keywords in _CATEGORY_KEYWORDS:
-        if _contains_any(lowered, keywords):
-            return category
-    return "other"
+def _extract_text_from_message(result: Any) -> str:
+    if isinstance(result, str):
+        return result
+
+    if isinstance(result, BaseMessage):
+        content = result.content
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                    parts.append(item["text"])
+            return "\n".join(parts)
+
+    content = getattr(result, "content", None)
+    if isinstance(content, str):
+        return content
+
+    return str(result)
 
 
-def _clean_lines(text: str) -> list[str]:
-    lines: list[str] = []
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line:
-            continue
-        line = re.sub(r"^[\-•*]+\s*", "", line)
-        line = re.sub(r"^\(?\d+[.)]\s*", "", line)
-        line = re.sub(r"^\(?[a-zA-Z][.)]\s*", "", line)
-        line = re.sub(r"\s+", " ", line).strip(" .")
-        if len(line) < 8:
-            continue
-        if line.lower() in {"inclusion criteria", "exclusion criteria"}:
-            continue
-        lines.append(line)
-    # de-duplicate preserving order
-    return list(dict.fromkeys(lines))
+def _strip_json_fences(text: str) -> str:
+    cleaned = text.strip()
+
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+
+    return cleaned.strip()
 
 
-def _split_sections(text: str) -> tuple[list[str], list[str]]:
-    if not text:
-        return [], []
-    if "Exclusion Criteria:" in text:
-        inclusion_part, exclusion_part = text.split("Exclusion Criteria:", 1)
-        inclusion_part = inclusion_part.replace("Inclusion Criteria:", "")
-        return _clean_lines(inclusion_part), _clean_lines(exclusion_part)
+def _extract_json_object(text: str) -> dict[str, Any]:
+    cleaned = _strip_json_fences(text)
 
-    lines = _clean_lines(text.replace("Inclusion Criteria:", ""))
-    inclusion: list[str] = []
-    exclusion: list[str] = []
-    for line in lines:
-        lowered = line.lower()
-        if any(
-            k in lowered
-            for k in ["exclude", "must not", "ineligible", "not eligible", "history of"]
-        ):
-            exclusion.append(line)
-        else:
-            inclusion.append(line)
-    return inclusion, exclusion
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError:
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+
+        if start == -1 or end == -1 or end <= start:
+            raise ValueError(
+                f"No JSON object found in LLM output: {cleaned[:500]}"
+            ) from None
+
+        parsed = json.loads(cleaned[start : end + 1])
+
+    if not isinstance(parsed, dict):
+        raise TypeError(f"Expected JSON object, got {type(parsed)!r}")
+
+    return parsed
 
 
-def _fallback_parse_criteria(eligibility_text: str) -> ParsedEligibilityCriterion:
-    inclusion_lines, exclusion_lines = _split_sections(eligibility_text)
+def _ensure_non_empty_parse(parsed: ParsedEligibilityCriterion, nct_id: str) -> None:
+    if parsed.inclusion_criteria or parsed.exclusion_criteria:
+        return
 
-    inclusion = [
-        EligibilityCriterion(
-            text=line,
-            is_hard_exclusion=False,
-            category=_infer_category(line),
-        )
-        for line in inclusion_lines[:60]
-    ]
-    exclusion = [
-        EligibilityCriterion(
-            text=line,
-            is_hard_exclusion=True,
-            category=_infer_category(line),
-        )
-        for line in exclusion_lines[:60]
-    ]
-    return ParsedEligibilityCriterion(
-        inclusion_criteria=inclusion,
-        exclusion_criteria=exclusion,
+    raise ValueError(
+        f"LLM produced empty criteria parse for {nct_id}. "
+        "Refusing deterministic fallback because criteria parsing must be LLM-backed."
     )
 
 
 async def parse_eligibility_criteria(eligibility_text: str, nct_id: str) -> dict[str, Any]:
-    if not eligibility_text or len(eligibility_text) < 20:
+    if not eligibility_text or len(eligibility_text.strip()) < 20:
         return {"inclusion_criteria": [], "exclusion_criteria": []}
 
     cache_params = {
@@ -124,47 +155,87 @@ async def parse_eligibility_criteria(eligibility_text: str, nct_id: str) -> dict
         if isinstance(cached, dict):
             return cached
 
+    parsed_obj = await _parse_with_llm_or_raise(cache_params)
+
+    result = parsed_obj.model_dump()
+    parsed = _assign_ids(result, nct_id)
+
+    if get_settings().use_cache:
+        await asyncio.to_thread(cache.set_cached, "criteria_parser", cache_params, parsed)
+
+    return parsed
+
+
+async def _parse_with_llm_or_raise(inputs: dict[str, Any]) -> ParsedEligibilityCriterion:
+    nct_id = str(inputs.get("nct_id", "unknown"))
+
+    structured_error: Exception | None = None
+
     try:
-        parsed_obj = await _invoke_criteria_llm(_get_chain(), cache_params)
-        if not parsed_obj.inclusion_criteria and not parsed_obj.exclusion_criteria:
-            parsed_obj = _fallback_parse_criteria(eligibility_text)
-        result = parsed_obj.model_dump()
-        parsed = _assign_ids(result, nct_id)
-
-        if get_settings().use_cache:
-            await asyncio.to_thread(cache.set_cached, "criteria_parser", cache_params, parsed)
-
+        parsed = await _invoke_structured_criteria_llm(_get_structured_chain(), inputs)
+        _ensure_non_empty_parse(parsed, nct_id)
         return parsed
-
-    except (ValueError, TypeError, RuntimeError) as exc:
+    except Exception as exc:
+        structured_error = exc
         logger.warning(
-            "Criteria parsing failed for {} ({}). Falling back to deterministic split.",
+            "Structured criteria parse failed for {}. Retrying with raw JSON LLM parse. Error: {}",
             nct_id,
             exc,
         )
-        fallback = _fallback_parse_criteria(eligibility_text)
-        return _assign_ids(fallback.model_dump(), nct_id)
+
+    try:
+        parsed = await _invoke_json_criteria_llm(_get_json_chain(), inputs)
+        _ensure_non_empty_parse(parsed, nct_id)
+        return parsed
+    except Exception as json_exc:
+        raise RuntimeError(
+            f"Criteria parsing failed for {nct_id}. "
+            f"Structured parse error: {structured_error}. "
+            f"JSON parse error: {json_exc}. "
+            "No deterministic fallback was used."
+        ) from json_exc
 
 
 @llm_retry
-async def _invoke_criteria_llm(chain: Any, inputs: dict[str, Any]) -> ParsedEligibilityCriterion:
+async def _invoke_structured_criteria_llm(
+    chain: Any,
+    inputs: dict[str, Any],
+) -> ParsedEligibilityCriterion:
     result = await chain.ainvoke(
         inputs,
-        config={"run_name": "criteria_parse", "tags": ["eligibility", "parse"]},
+        config={"run_name": "criteria_parse_structured", "tags": ["eligibility", "parse"]},
     )
 
     if result is None:
-        raise ValueError("LLM returned None for criteria parse")
+        raise ValueError("LLM returned None for structured criteria parse")
 
     if isinstance(result, ParsedEligibilityCriterion):
         return result
+
     if isinstance(result, dict):
         return ParsedEligibilityCriterion.model_validate(result)
-    raise TypeError(f"Unexpected criteria parser output type: {type(result)!r}")
+
+    raise TypeError(f"Unexpected structured criteria parser output type: {type(result)!r}")
+
+
+@llm_retry
+async def _invoke_json_criteria_llm(
+    chain: Any,
+    inputs: dict[str, Any],
+) -> ParsedEligibilityCriterion:
+    result = await chain.ainvoke(
+        inputs,
+        config={"run_name": "criteria_parse_json", "tags": ["eligibility", "parse", "json"]},
+    )
+
+    text = _extract_text_from_message(result)
+    parsed_dict = _extract_json_object(text)
+    return ParsedEligibilityCriterion.model_validate(parsed_dict)
 
 
 def _assign_ids(
-    parsed: dict[str, list[dict[str, Any]]], nct_id: str
+    parsed: dict[str, list[dict[str, Any]]],
+    nct_id: str,
 ) -> dict[str, list[dict[str, Any]]]:
     for i, crit in enumerate(parsed.get("inclusion_criteria", [])):
         crit["criterion_id"] = f"{nct_id}_inc_{i}"
@@ -200,12 +271,15 @@ async def parse_criteria_for_trials(
     results_parsed = await asyncio.gather(*tasks, return_exceptions=True)
 
     results = []
+    failures: list[str] = []
+
     for trial, parsed in zip(trials, results_parsed, strict=False):
+        nct_id = trial.get("nct_id", "unknown")
+
         if isinstance(parsed, BaseException):
-            logger.exception(
-                "gather task failed for {}: {}", trial.get("nct_id", "unknown"), parsed
-            )
-            parsed = {"inclusion_criteria": [], "exclusion_criteria": []}
+            logger.exception("Criteria parsing failed for {}: {}", nct_id, parsed)
+            failures.append(str(nct_id))
+            continue
 
         results.append(
             {
@@ -213,6 +287,13 @@ async def parse_criteria_for_trials(
                 "inclusion_criteria": parsed.get("inclusion_criteria", []),
                 "exclusion_criteria": parsed.get("exclusion_criteria", []),
             }
+        )
+
+    if failures:
+        raise RuntimeError(
+            "Criteria parsing failed for trial(s): "
+            + ", ".join(failures)
+            + ". No deterministic fallback was used."
         )
 
     return results

@@ -246,17 +246,9 @@ def _assess_inclusion_biomarker(
     biomarker_blob = _biomarker_blob(patient_profile)
 
     if criterion_targets:
-        if any(
-            re.search(rf"(?<![a-z0-9]){re.escape(target)}(?![a-z0-9])", biomarker_blob)
-            for target in criterion_targets
-        ):
-            return "MEETS", "Criterion-specific biomarker evidence exists in profile"
-        return "UNCERTAIN", "Criterion-specific biomarker result missing"
+        return _assess_targeted_biomarker(criterion_targets, biomarker_blob)
 
-    is_generic_mutation_criterion = (
-        "mutation" in lowered or "molecular" in lowered or "genomic" in lowered
-    )
-    if is_generic_mutation_criterion:
+    if _is_generic_mutation_criterion(lowered):
         return (
             "UNCERTAIN",
             "Criterion requires specific biomarker target; generic mutation evidence is insufficient",
@@ -266,6 +258,23 @@ def _assess_inclusion_biomarker(
         return "MEETS", "Biomarker evidence exists in profile"
 
     return "UNCERTAIN", "Required biomarker information missing"
+
+
+def _assess_targeted_biomarker(criterion_targets: set[str], biomarker_blob: str) -> tuple[str, str]:
+    if _any_biomarker_target_present(criterion_targets, biomarker_blob):
+        return "MEETS", "Criterion-specific biomarker evidence exists in profile"
+    return "UNCERTAIN", "Criterion-specific biomarker result missing"
+
+
+def _any_biomarker_target_present(criterion_targets: set[str], biomarker_blob: str) -> bool:
+    return any(
+        re.search(rf"(?<![a-z0-9]){re.escape(target)}(?![a-z0-9])", biomarker_blob)
+        for target in criterion_targets
+    )
+
+
+def _is_generic_mutation_criterion(lowered: str) -> bool:
+    return "mutation" in lowered or "molecular" in lowered or "genomic" in lowered
 
 
 def _assess_inclusion_performance(

@@ -79,33 +79,8 @@ class JudgeVerdict(BaseModel):
         if self.match_tier != "strong":
             return self
 
-        assessed_count = (
-            len(self.inclusion_met) + len(self.inclusion_failed) + len(self.exclusion_triggered)
-        )
-        total_count = assessed_count + len(self.inclusion_uncertain) + len(self.exclusion_uncertain)
-        uncertain_ratio = (
-            (len(self.inclusion_uncertain) + len(self.exclusion_uncertain)) / total_count
-            if total_count
-            else 1.0
-        )
-        major_met_count = sum(
-            1
-            for criterion in self.inclusion_met
-            if any(keyword in criterion.lower() for keyword in MAJOR_CRITERION_KEYWORDS)
-        )
-
-        strong_requirements_met = (
-            not self.exclusion_triggered
-            and not self.exclusion_uncertain
-            and self.major_criteria_assessable
-            and major_met_count >= MIN_MAJOR_MET_FOR_STRONG
-            and assessed_count >= MIN_ASSESSED_CRITERIA_FOR_STRONG
-            and total_count >= MIN_TOTAL_CRITERIA_FOR_STRONG
-            and uncertain_ratio <= MAX_UNCERTAIN_RATIO_FOR_STRONG
-            and len(self.critical_missing_info) == 0
-            and len(self.inclusion_failed) == 0
-        )
-        if strong_requirements_met:
+        metrics = _strong_tier_metrics(self)
+        if _strong_requirements_met(self, metrics):
             return self
 
         if self.exclusion_triggered:
@@ -118,3 +93,42 @@ class JudgeVerdict(BaseModel):
         if self.match_score > 0.74:
             self.match_score = 0.74
         return self
+
+
+def _strong_tier_metrics(verdict: JudgeVerdict) -> dict[str, float | int]:
+    assessed_count = (
+        len(verdict.inclusion_met)
+        + len(verdict.inclusion_failed)
+        + len(verdict.exclusion_triggered)
+    )
+    uncertain_count = len(verdict.inclusion_uncertain) + len(verdict.exclusion_uncertain)
+    total_count = assessed_count + uncertain_count
+    uncertain_ratio = uncertain_count / total_count if total_count else 1.0
+    return {
+        "assessed_count": assessed_count,
+        "total_count": total_count,
+        "uncertain_ratio": uncertain_ratio,
+        "major_met_count": _major_met_count(verdict.inclusion_met),
+    }
+
+
+def _major_met_count(criteria: list[str]) -> int:
+    return sum(
+        1
+        for criterion in criteria
+        if any(keyword in criterion.lower() for keyword in MAJOR_CRITERION_KEYWORDS)
+    )
+
+
+def _strong_requirements_met(verdict: JudgeVerdict, metrics: dict[str, float | int]) -> bool:
+    return (
+        not verdict.exclusion_triggered
+        and not verdict.exclusion_uncertain
+        and verdict.major_criteria_assessable
+        and int(metrics["major_met_count"]) >= MIN_MAJOR_MET_FOR_STRONG
+        and int(metrics["assessed_count"]) >= MIN_ASSESSED_CRITERIA_FOR_STRONG
+        and int(metrics["total_count"]) >= MIN_TOTAL_CRITERIA_FOR_STRONG
+        and float(metrics["uncertain_ratio"]) <= MAX_UNCERTAIN_RATIO_FOR_STRONG
+        and len(verdict.critical_missing_info) == 0
+        and len(verdict.inclusion_failed) == 0
+    )

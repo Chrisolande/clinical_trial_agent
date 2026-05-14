@@ -21,7 +21,16 @@ uv run clinical-trial-agent validate-env
 uv run make check
 ```
 
-## 4) Run the pipeline
+## 4) Offline evaluation
+
+```bash
+uv run make eval
+```
+
+Review `evaluation/reports/latest_eval_report.md` for metric thresholds,
+pass/fail status, worst failing synthetic cases, and calibration buckets.
+
+## 5) Run the pipeline
 
 ```bash
 uv run clinical-trial-agent run ./patient_profile.json
@@ -30,5 +39,12 @@ uv run clinical-trial-agent run ./patient_profile.json
 ## CI-equivalent test command
 
 ```bash
-uv run pytest --cov --cov-report=xml --cov-fail-under=75
+uv run pytest \
+  --cov=clinical_trial_agent \
+  --cov=agents \
+  --cov=subagents \
+  --cov=tools \
+  --cov=models \
+  --cov-report=xml \
+  --cov-fail-under=75
 ```

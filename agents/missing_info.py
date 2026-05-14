@@ -148,46 +148,63 @@ def _enrich_with_trial_context(
 ) -> list[dict[str, Any]]:
     enriched: list[dict[str, Any]] = []
     for item in items:
-        field_id = str(item.get("field_id", "")).strip()
-        if not field_id:
-            source = str(item.get("display_name") or item.get("field") or "").strip().lower()
-            field_id = re.sub(r"[^a-z0-9]+", "_", source).strip("_") or "additional_clinical_detail"
+        field_id = _missing_info_field_id(item)
         context = uncertain_by_field.get(field_id, {})
-
-        display_name = (
-            str(
-                item.get("display_name") or item.get("field") or context.get("display_name") or ""
-            ).strip()
-            or field_id.replace("_", " ").title()
-        )
-        rationale = str(
-            item.get("why_needed")
-            or item.get("evidence_text")
-            or item.get("description")
-            or context.get("why_needed")
-            or ""
-        ).strip()
-        item_ids = [str(tid) for tid in (item.get("affected_trial_ids") or [])]
-        context_ids = [str(tid) for tid in (context.get("affected_trial_ids") or [])]
-        affected_ids = list(dict.fromkeys(item_ids + context_ids))
-        priority = str(item.get("priority", "")).lower()
-        if priority not in {"high", "medium", "low"}:
-            priority = _priority_from_impact(len(set(affected_ids)))
-
+        affected_ids = _merged_affected_ids(item, context)
         enriched.append(
             {
                 "field_id": field_id,
-                "display_name": display_name,
+                "display_name": _missing_info_display_name(item, context, field_id),
                 "category": str(item.get("category") or context.get("category") or "clinical"),
-                "field": display_name,
-                "why_needed": rationale,
-                "evidence_text": rationale,
-                "description": rationale,
+                "field": _missing_info_display_name(item, context, field_id),
+                "why_needed": _missing_info_rationale(item, context),
+                "evidence_text": _missing_info_rationale(item, context),
+                "description": _missing_info_rationale(item, context),
                 "affected_trial_ids": affected_ids,
-                "priority": priority,
+                "priority": _missing_info_priority(item, affected_ids),
             }
         )
     return enriched
+
+
+def _missing_info_field_id(item: dict[str, Any]) -> str:
+    field_id = str(item.get("field_id", "")).strip()
+    if field_id:
+        return field_id
+    source = str(item.get("display_name") or item.get("field") or "").strip().lower()
+    return re.sub(r"[^a-z0-9]+", "_", source).strip("_") or "additional_clinical_detail"
+
+
+def _missing_info_display_name(item: dict[str, Any], context: dict[str, Any], field_id: str) -> str:
+    return (
+        str(
+            item.get("display_name") or item.get("field") or context.get("display_name") or ""
+        ).strip()
+        or field_id.replace("_", " ").title()
+    )
+
+
+def _missing_info_rationale(item: dict[str, Any], context: dict[str, Any]) -> str:
+    return str(
+        item.get("why_needed")
+        or item.get("evidence_text")
+        or item.get("description")
+        or context.get("why_needed")
+        or ""
+    ).strip()
+
+
+def _merged_affected_ids(item: dict[str, Any], context: dict[str, Any]) -> list[str]:
+    item_ids = [str(tid) for tid in (item.get("affected_trial_ids") or [])]
+    context_ids = [str(tid) for tid in (context.get("affected_trial_ids") or [])]
+    return list(dict.fromkeys(item_ids + context_ids))
+
+
+def _missing_info_priority(item: dict[str, Any], affected_ids: list[str]) -> str:
+    priority = str(item.get("priority", "")).lower()
+    if priority in {"high", "medium", "low"}:
+        return priority
+    return _priority_from_impact(len(set(affected_ids)))
 
 
 _ACTIONABLE_FIELD_MAP: dict[str, dict[str, str]] = {

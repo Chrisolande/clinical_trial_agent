@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="", case_sensitive=False, extra="ignore")
 
     llm_provider: Literal["deepseek", "openai", "anthropic", "ollama"] = "deepseek"
+    llm_privacy_mode: Literal["blocked", "deidentified", "full_consent", "local_only"] = "blocked"
     deepseek_api_key: SecretStr = Field(default=SecretStr(""), repr=False)
     deepseek_model: str = "deepseek-chat"
 
@@ -115,6 +116,16 @@ class Settings(BaseSettings):
         if normalized in {"deepseek", "openai", "anthropic", "ollama"}:
             return normalized
         raise ValueError("LLM_PROVIDER must be one of: deepseek, openai, anthropic, ollama")
+
+    @field_validator("llm_privacy_mode", mode="before")
+    @classmethod
+    def _normalize_privacy_mode(_cls, value: object) -> str:
+        normalized = str(value or "blocked").strip().lower()
+        if normalized in {"blocked", "deidentified", "full_consent", "local_only"}:
+            return normalized
+        raise ValueError(
+            "LLM_PRIVACY_MODE must be one of: blocked, deidentified, full_consent, local_only"
+        )
 
     @field_validator("log_level", mode="before")
     @classmethod
@@ -192,6 +203,10 @@ def require_external_llm_consent(*, node_name: str | None = None) -> None:
         "CLINICAL_DATA_EXTERNAL_LLM_CONSENT=true is required before sending patient data "
         f"to external LLMs{context}."
     )
+
+
+def is_llm_provider_local() -> bool:
+    return is_local_provider(get_settings().llm_provider)
 
 
 def get_llm(*, contains_phi: bool = True, node_name: str | None = None) -> Any:

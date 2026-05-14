@@ -9,6 +9,32 @@ def _canonical_field_id(text: str) -> str:
     return slug or "additional_clinical_detail"
 
 
+def _first_text(data: dict[str, Any], keys: tuple[str, ...]) -> str:
+    return str(next((data.get(key) for key in keys if data.get(key)), "")).strip()
+
+
+def _coerce_affected_trial_ids(raw_ids: Any) -> list[str]:
+    if isinstance(raw_ids, str):
+        raw_ids = [raw_ids]
+    return list(dict.fromkeys(str(tid) for tid in raw_ids or []))
+
+
+def _legacy_missing_info_fields(data: dict[str, Any]) -> dict[str, Any]:
+    display_name = _first_text(data, ("display_name", "field"))
+    field_id = _first_text(data, ("field_id",)) or _canonical_field_id(display_name)
+    rationale = _first_text(data, ("why_needed", "evidence_text", "description"))
+    return {
+        "field_id": field_id,
+        "display_name": display_name or field_id.replace("_", " ").title(),
+        "field": str(data.get("field") or display_name or field_id.replace("_", " ").title()),
+        "category": str(data.get("category") or "clinical"),
+        "why_needed": rationale,
+        "evidence_text": rationale,
+        "description": rationale,
+        "affected_trial_ids": _coerce_affected_trial_ids(data.get("affected_trial_ids")),
+    }
+
+
 class CompletenessAssessment(BaseModel):
     field_id: str = Field(
         description="Canonical stable identifier for the missing field (snake_case)."
@@ -43,30 +69,7 @@ class CompletenessAssessment(BaseModel):
         if not isinstance(data, dict):
             return data
 
-        display_name = str(data.get("display_name") or data.get("field") or "").strip()
-        field_id = str(data.get("field_id") or "").strip() or _canonical_field_id(display_name)
-        why_needed = str(
-            data.get("why_needed") or data.get("evidence_text") or data.get("description") or ""
-        ).strip()
-        evidence_text = str(
-            data.get("evidence_text") or data.get("why_needed") or data.get("description") or ""
-        ).strip()
-        description = str(
-            data.get("description") or data.get("why_needed") or data.get("evidence_text") or ""
-        ).strip()
-        raw_ids = data.get("affected_trial_ids") or []
-        if isinstance(raw_ids, str):
-            raw_ids = [raw_ids]
-        affected_trial_ids = list(dict.fromkeys(str(tid) for tid in raw_ids))
-
-        data["field_id"] = field_id
-        data["display_name"] = display_name or field_id.replace("_", " ").title()
-        data["field"] = str(data.get("field") or data["display_name"])
-        data["category"] = str(data.get("category") or "clinical")
-        data["why_needed"] = why_needed
-        data["evidence_text"] = evidence_text
-        data["description"] = description
-        data["affected_trial_ids"] = affected_trial_ids
+        data.update(_legacy_missing_info_fields(data))
         return data
 
     @model_validator(mode="after")

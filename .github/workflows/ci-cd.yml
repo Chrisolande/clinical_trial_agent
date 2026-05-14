@@ -47,7 +47,7 @@ jobs:
           uv run --all-groups ruff check .
           uv run --all-groups ruff format --check .
           uv run --all-groups mypy .
-          uv run --all-groups radon cc --min B .
+          uv run --all-groups python -m tools.complexity_gate clinical_trial_agent agents subagents tools models
 
   test:
     name: Tests (py${{ matrix.python-version }})
@@ -91,7 +91,16 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-groups
       - name: Run tests with coverage
-        run: uv run --all-groups pytest --cov=clinical_trial_agent --cov-report=xml --cov-fail-under=${{ env.QUALITY_COVERAGE_MIN }}
+        run: |
+          uv run --all-groups pytest \
+            --cov=clinical_trial_agent \
+            --cov=agents \
+            --cov=subagents \
+            --cov=tools \
+            --cov=models \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --cov-fail-under=${{ env.QUALITY_COVERAGE_MIN }}
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.13'
         uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
@@ -197,6 +206,23 @@ jobs:
           PY
       - name: Run security checks
         run: uv run --all-groups bandit -r clinical_trial_agent agents subagents tools models -ll
+      - name: Dependency vulnerability scan
+        run: uv run --all-groups --with pip-audit pip-audit
+      - name: Build Docker image for scanning
+        run: docker build -t clinical-trial-agent:ci .
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: clinical-trial-agent:ci
+          format: spdx-json
+          output-file: sbom.spdx.json
+      - name: Container vulnerability scan
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: clinical-trial-agent:ci
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: "1"
 
   build-and-push:
     name: Build Docker image and push (main/tags)

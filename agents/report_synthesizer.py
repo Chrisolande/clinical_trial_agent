@@ -1,23 +1,15 @@
 import asyncio
+import json
 from collections import Counter
 from typing import Any
 
 from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
+from models.report import ReportPlan
 from prompts.synthesis import build_synthesis_prompt
-from pydantic import BaseModel, Field
 from tools.retry import llm_retry
 
 from clinical_trial_agent.config import get_llm, get_settings
-
-
-class ExecutiveSummaryModel(BaseModel):
-    executive_summary: str = Field(
-        description="A 150-250 word physician-level executive summary of the trial matches."
-    )
-    patient_summary: str = Field(
-        description="A concise 1-sentence demographic and clinical description of the patient"
-    )
 
 
 def _enforce_conservative_wording(summary: str, critical_missing_count: int) -> str:
@@ -52,55 +44,68 @@ def _describe_patient(patient_profile: dict[str, Any]) -> str:
 
 
 def _collect_exec_risk_signals(scored_trials: list[dict[str, Any]]) -> dict[str, Any]:
-    hard_exclusion_count = sum(int(t.get("hard_exclusion_failures", 0) or 0) for t in scored_trials)
-    uncertain_major_criteria_count = sum(
-        1 for t in scored_trials if t.get("major_criteria_assessable") is False
-    )
-    na_criteria_count = sum(
-        int(
-            t.get("na_count")
-            or t.get("n_a_count")
-            or t.get("not_applicable_count")
-            or t.get("not_applicable_criteria_count")
-            or 0
-        )
-        for t in scored_trials
-    )
+    deduped_missing_fields = _deduped_critical_missing_fields(scored_trials)
 
-    missing_fields: list[str] = []
-    for trial in scored_trials:
-        for item in trial.get("critical_missing_info", []) or []:
-            value = str(item).strip()
-            if value:
-                missing_fields.append(value)
-    deduped_missing_fields = list(dict.fromkeys(missing_fields))
+    return {
+        "hard_exclusion_count": _hard_exclusion_count(scored_trials),
+        "uncertain_major_criteria_count": _uncertain_major_criteria_count(scored_trials),
+        "na_criteria_count": _not_applicable_criteria_count(scored_trials),
+        "critical_missing_count": len(deduped_missing_fields),
+        "critical_missing_fields": deduped_missing_fields[:12],
+        "trial_type_signal": _trial_type_signal(scored_trials),
+    }
 
-    type_counts: Counter[str] = Counter()
-    for trial in scored_trials:
-        raw_type = str(trial.get("study_type") or trial.get("trial_type") or "").strip().lower()
-        if "observational" in raw_type:
-            type_counts["observational"] += 1
-        elif "registry" in raw_type:
-            type_counts["registry"] += 1
-        elif "interventional" in raw_type:
-            type_counts["interventional"] += 1
-    if type_counts:
-        trial_type_signal = ", ".join(
+
+def _hard_exclusion_count(scored_trials: list[dict[str, Any]]) -> int:
+    return sum(int(t.get("hard_exclusion_failures", 0) or 0) for t in scored_trials)
+
+
+def _uncertain_major_criteria_count(scored_trials: list[dict[str, Any]]) -> int:
+    return sum(1 for t in scored_trials if t.get("major_criteria_assessable") is False)
+
+
+def _not_applicable_criteria_count(scored_trials: list[dict[str, Any]]) -> int:
+    return sum(int(_first_trial_count(t, _NA_COUNT_KEYS)) for t in scored_trials)
+
+
+_NA_COUNT_KEYS = ("na_count", "n_a_count", "not_applicable_count", "not_applicable_criteria_count")
+
+
+def _first_trial_count(trial: dict[str, Any], keys: tuple[str, ...]) -> int:
+    return next((int(trial.get(key) or 0) for key in keys if trial.get(key)), 0)
+
+
+def _deduped_critical_missing_fields(scored_trials: list[dict[str, Any]]) -> list[str]:
+    missing_fields = [
+        value
+        for trial in scored_trials
+        for item in trial.get("critical_missing_info", []) or []
+        if (value := str(item).strip())
+    ]
+    return list(dict.fromkeys(missing_fields))
+
+
+def _trial_type_signal(scored_trials: list[dict[str, Any]]) -> str:
+    type_counts = Counter(_trial_type_label(trial) for trial in scored_trials)
+    return (
+        ", ".join(
             f"{label}={type_counts[label]}"
             for label in ("interventional", "observational", "registry")
             if type_counts[label] > 0
         )
-    else:
-        trial_type_signal = "not available"
+        or "not available"
+    )
 
-    return {
-        "hard_exclusion_count": hard_exclusion_count,
-        "uncertain_major_criteria_count": uncertain_major_criteria_count,
-        "na_criteria_count": na_criteria_count,
-        "critical_missing_count": len(deduped_missing_fields),
-        "critical_missing_fields": deduped_missing_fields[:12],
-        "trial_type_signal": trial_type_signal,
-    }
+
+def _trial_type_label(trial: dict[str, Any]) -> str:
+    raw_type = str(trial.get("study_type") or trial.get("trial_type") or "").strip().lower()
+    if "observational" in raw_type:
+        return "observational"
+    if "registry" in raw_type:
+        return "registry"
+    if "interventional" in raw_type:
+        return "interventional"
+    return "unknown"
 
 
 def _build_exec_summary_context(
@@ -110,7 +115,7 @@ def _build_exec_summary_context(
     strong, moderate, weak, disqualified = _count_tiers(scored_trials)
     risk = _collect_exec_risk_signals(scored_trials)
     top_trials_summary = "\n".join(
-        f"- {t['brief_title']} ({t['trial_id']}): tier={t['tier']}, score={t['score']:.2f}, concern={t.get('key_concern', '')}"
+        f"- {t.get('brief_title', '')} ({t.get('trial_id', '')}): tier={t.get('tier', 'weak')}, score={float(t.get('score', 0.0)):.2f}, concern={t.get('key_concern', '')}"
         for t in scored_trials[:5]
     )
     patient_sum = _describe_patient(patient_profile)
@@ -131,44 +136,111 @@ def _build_exec_summary_context(
     }
 
 
+def _serialize(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _retrieval_failed_with_zero_trials(
+    scored_trials: list[dict[str, Any]], qa_issues: list[dict[str, Any] | str]
+) -> bool:
+    if scored_trials:
+        return False
+    issue_codes = {
+        str(issue.get("code", "")).strip()
+        for issue in qa_issues
+        if isinstance(issue, dict)
+    }
+    return "RETRIEVAL_FAILED_EMPTY_RESULT" in issue_codes
+
+
 @llm_retry
-async def _invoke_exec_summary_llm(chain: Any, context: dict[str, Any]) -> dict[str, Any]:
+async def _invoke_report_plan_llm(chain: Any, context: dict[str, Any]) -> ReportPlan:
     result = await asyncio.wait_for(
         chain.ainvoke(
             context,
-            config={"run_name": "executive_summary", "tags": ["synthesis", "report"]},
+            config={"run_name": "report_plan", "tags": ["synthesis", "report"]},
         ),
         timeout=get_settings().llm_call_timeout_seconds,
     )
-    if not isinstance(result, ExecutiveSummaryModel):
-        raise ValueError(f"Unexpected report summary result type: {type(result)}")
-    return result.model_dump()
+    if not isinstance(result, ReportPlan):
+        raise ValueError(f"Unexpected report plan result type: {type(result)}")
+    return result
+
+
+async def generate_report_plan(
+    patient_profile: dict[str, Any],
+    scored_trials: list[dict[str, Any]],
+    eligibility_verdicts: dict[str, dict[str, Any]],
+    missing_info: list[dict[str, Any]],
+    qa_issues: list[dict[str, Any] | str],
+) -> ReportPlan:
+    key_concerns = [
+        {"trial_id": str(trial.get("trial_id", "")), "key_concern": str(trial.get("key_concern", ""))}
+        for trial in scored_trials
+        if str(trial.get("key_concern", "")).strip()
+    ]
+    critical_missing_info = [
+        {
+            "trial_id": str(trial.get("trial_id", "")),
+            "critical_missing_info": list(trial.get("critical_missing_info", []) or []),
+        }
+        for trial in scored_trials
+    ]
+    context = {
+        "patient_profile": _serialize(patient_profile),
+        "patient_summary": _describe_patient(patient_profile),
+        "scored_trials": _serialize(scored_trials),
+        "eligibility_verdicts": _serialize(eligibility_verdicts),
+        "key_concerns": _serialize(key_concerns),
+        "critical_missing_info": _serialize(critical_missing_info),
+        "missing_info": _serialize(missing_info),
+        "qa_issues": _serialize(qa_issues),
+    }
+    prompt = ChatPromptTemplate.from_template(build_synthesis_prompt())
+    chain = prompt | get_llm().with_structured_output(ReportPlan)
+
+    try:
+        report_plan = await _invoke_report_plan_llm(chain, context)
+    except Exception as exc:
+        if _retrieval_failed_with_zero_trials(scored_trials, qa_issues):
+            patient_summary = _describe_patient(patient_profile)
+            return ReportPlan(
+                patient_summary=patient_summary,
+                executive_summary=(
+                    "Trial retrieval failed before eligibility fan-out completed. "
+                    "No matches are reported because zero trials were retrieved/evaluated."
+                ),
+                bottom_line="Unable to prioritize trials because retrieval returned zero evaluated trials.",
+                strong_matches=[],
+                moderate_matches=[],
+                information_gaps=[],
+                recommended_actions=[],
+                excluded_summary="No trial exclusions available because no trials were evaluated.",
+                limitations=["Trial retrieval failed before eligibility fan-out completed."],
+            )
+        logger.error("Report plan generation failed after retries: {}", exc)
+        raise RuntimeError(f"Structured report planning failed: {exc}") from exc
+
+    critical_missing_count = len(_deduped_critical_missing_fields(scored_trials))
+    report_plan.executive_summary = _enforce_conservative_wording(
+        report_plan.executive_summary,
+        critical_missing_count,
+    )
+    return report_plan
 
 
 async def generate_executive_summary(
     patient_profile: dict[str, Any],
     scored_trials: list[dict[str, Any]],
 ) -> dict[str, str]:
-    context = _build_exec_summary_context(patient_profile, scored_trials)
-    prompt = ChatPromptTemplate.from_template(build_synthesis_prompt())
-    chain = prompt | get_llm().with_structured_output(ExecutiveSummaryModel)
-
-    try:
-        result = await _invoke_exec_summary_llm(chain, context)
-        return {
-            "executive_summary": _enforce_conservative_wording(
-                result["executive_summary"], int(context["critical_missing_count"])
-            ),
-            "patient_summary": result["patient_summary"],
-        }
-    except Exception as exc:
-        logger.error("Executive summary generation failed after retries: {}", exc)
-
+    report_plan = await generate_report_plan(
+        patient_profile=patient_profile,
+        scored_trials=scored_trials,
+        eligibility_verdicts={},
+        missing_info=[],
+        qa_issues=[],
+    )
     return {
-        "executive_summary": (
-            f"Conservative triage completed for {context['total']} trials. "
-            f"Strong: {context['strong_count']}, Moderate: {context['moderate_count']}, "
-            f"Excluded (weak/disqualified): {context['excluded_count']}."
-        ),
-        "patient_summary": context["patient_summary"],
+        "executive_summary": report_plan.executive_summary,
+        "patient_summary": report_plan.patient_summary,
     }

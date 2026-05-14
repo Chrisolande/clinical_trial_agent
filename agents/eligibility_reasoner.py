@@ -17,7 +17,7 @@ async def _judge_trial(
     trial: dict[str, Any],
     criteria: list[dict[str, Any]],
 ) -> JudgeVerdict:
-    llm = get_llm()
+    llm = get_llm(contains_phi=False, node_name="eligibility_judge")
     if hasattr(llm, "with_structured_output"):
         llm = llm.with_structured_output(JudgeVerdict)
 
@@ -102,6 +102,7 @@ def _summarize_verdict_counts(
 
 def _build_batch_result(
     trial_id: str,
+    trial: dict[str, Any],
     verdict: JudgeVerdict,
     verdicts: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -114,6 +115,9 @@ def _build_batch_result(
         fails_count=fails_count,
         uncertain_count=uncertain_count,
         hard_exclusion_failures=hard_exclusion_failures,
+    )
+    adjusted_tier, adjusted_score = _apply_criteria_provenance_caps(
+        trial, adjusted_tier, adjusted_score
     )
     return {
         "trial_id": trial_id,
@@ -128,7 +132,28 @@ def _build_batch_result(
         "fails_count": fails_count,
         "uncertain_count": uncertain_count,
         "hard_exclusion_failures": hard_exclusion_failures,
+        "criteria_source": trial.get("criteria_source", "missing"),
+        "criteria_source_verified": bool(trial.get("criteria_source_verified", False)),
+        "criteria_retrieved_at": trial.get("criteria_retrieved_at"),
+        "criteria_completeness": trial.get("criteria_completeness", "missing"),
     }
+
+
+def _apply_criteria_provenance_caps(
+    trial: dict[str, Any], tier: str, score: float
+) -> tuple[str, float]:
+    source_verified = bool(trial.get("criteria_source_verified", False))
+    completeness = str(trial.get("criteria_completeness", "missing"))
+    source = str(trial.get("criteria_source", "missing"))
+    if source_verified and completeness == "full":
+        return tier, score
+    if source == "missing" or completeness == "missing":
+        if TIER_ORDER[tier] > TIER_ORDER["weak"]:
+            tier = "weak"
+        return tier, min(score, 0.45)
+    if TIER_ORDER[tier] > TIER_ORDER["moderate"]:
+        tier = "moderate"
+    return tier, min(score, 0.65)
 
 
 def _apply_sparse_evidence_caps(
@@ -178,4 +203,4 @@ async def evaluate_criteria_batch(
         verdict = fallback_verdict_for_exception(exc, trial_id, patient_profile, all_criteria)
 
     verdicts = _build_verdict_rows(verdict)
-    return _build_batch_result(trial_id, verdict, verdicts)
+    return _build_batch_result(trial_id, trial, verdict, verdicts)

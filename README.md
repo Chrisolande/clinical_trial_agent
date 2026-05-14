@@ -50,7 +50,6 @@ The maintained architecture and data-flow notes live in [`docs/architecture.merm
 - Python 3.11 through 3.13
 - `uv`
 - PostgreSQL 16+ for memory and cache-backed workflows
-- `nltk` stopwords corpus
 - A configured LLM provider key for the provider you use
 
 ## Quick Start
@@ -58,8 +57,14 @@ The maintained architecture and data-flow notes live in [`docs/architecture.merm
 ```bash
 git clone https://github.com/Chrisolande/clinical_trial_agent.git
 cd clinical_trial_agent
-uv sync --locked --group dev
-docker compose up db
+uv sync --locked --all-groups
+docker compose up -d db
+```
+
+Download the required NLTK data:
+
+```bash
+uv run python -m nltk.downloader stopwords
 ```
 
 Run the environment check before the first pipeline execution:
@@ -77,24 +82,76 @@ Set the required environment variables before running the pipeline:
 
 ```bash
 DEEPSEEK_API_KEY=your-key
-DATABASE_URI=postgresql://postgres:postgres@localhost:5432/postgres
-MEMORY_DB_DSN=postgresql://postgres:postgres@localhost:5432/postgres
+DATABASE_URI=postgresql://postgres:postgres@localhost:5433/postgres
+MEMORY_DB_DSN=postgresql://postgres:postgres@localhost:5433/postgres
 PROFILE_HASH_SALT=your-salt
 DB_ENCRYPTION_KEY=base64-encoded-32-byte-key
 TENANT_ID=your-tenant
 FACILITY_ID=your-facility
-CLINICAL_DATA_EXTERNAL_LLM_CONSENT=false
+CLINICAL_DATA_EXTERNAL_LLM_CONSENT=true
+LLM_PRIVACY_MODE=full_consent
 CTGOV_TRANSPORT_MODE=get
 ```
 
 Optional retrieval settings:
 
 ```bash
-CTGOV_PROXY_URL=https://your-internal-proxy/ctgov/search
+CTGOV_PROXY_URL=http://localhost:8000/ctgov/search
 ```
 
 > [!IMPORTANT]
 > `DATABASE_URI` and `MEMORY_DB_DSN` should point to the same database in the default local setup.
+
+> [!TIP]
+> The ClinicalTrials.gov proxy is **auto-started** by the CLI when `CTGOV_PROXY_URL` is set but the proxy is not reachable (see [ClinicalTrials.gov Proxy](#clinicaltrialsgov-proxy) below). You do not need to start it manually.
+
+## Run The Default Synthetic Profile
+
+`patient_profile.json` is a synthetic fixture. The CLI uses the same
+fail-closed clinical-data controls as a real run, so local execution needs
+PostgreSQL and a configured LLM provider.
+
+Start PostgreSQL from Compose:
+
+```bash
+docker compose up -d db
+docker compose ps
+```
+
+The compose file maps PostgreSQL to host port `5433`, so use that port in local
+CLI environment variables.
+
+Run the default profile:
+
+```bash
+export DATABASE_URI=postgresql://postgres:postgres@localhost:5433/postgres
+export MEMORY_DB_DSN=postgresql://postgres:postgres@localhost:5433/postgres
+export PROFILE_HASH_SALT=local-dev-salt
+export DB_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+export TENANT_ID=local-tenant
+export FACILITY_ID=local-facility
+export TAVILY_ENABLE_CTGOV_SUPPLEMENT=false
+
+export LLM_PROVIDER=deepseek
+export DEEPSEEK_API_KEY=your-deepseek-key
+export LLM_PRIVACY_MODE=full_consent
+export CLINICAL_DATA_EXTERNAL_LLM_CONSENT=true
+
+uv run clinical-trial-agent run ./patient_profile.json
+```
+
+The CLI will **automatically start** the ClinicalTrials.gov proxy if it is not
+already running. You do not need to start it in a separate terminal.
+
+Expected behavior:
+
+- The first run starts the proxy, retrieves trials, initializes PostgreSQL
+  memory, and prints a clinical review report.
+- A later run with the same tenant/facility/salt can be served from episodic
+  memory.
+- If the LLM key is invalid, the pipeline should still fail closed and produce a
+  conservative fallback report rather than a high-confidence match.
+- The proxy subprocess is terminated automatically when the CLI exits.
 
 ## Usage
 
@@ -137,11 +194,22 @@ The pipeline produces:
 ## Safety and Guardrails
 
 - PHI-bearing retrieval uses a fail-closed transport policy
-- External LLM calls require explicit consent when PHI is involved
+- External LLM prompts are controlled by `LLM_PRIVACY_MODE`: `blocked`,
+  `deidentified`, `full_consent`, or `local_only`
 - QA checks can block synthesis on critical inconsistencies
 - Medication safety rules disqualify trials with known contraindications
 - Tenant and facility defaults are rejected in runtime checks and CI
 - Secret scanning is enforced in CI with a tracked baseline
+- Webhook callbacks require HTTPS by default, block local/private targets, and
+  can be HMAC signed with `WEBHOOK_SIGNING_SECRET`
+
+Criteria provenance is included in trial records and reports. Official
+ClinicalTrials.gov criteria are verified/full; snippet-only criteria are
+unverified/partial and cannot produce a `strong` tier.
+
+Physician feedback is tenant/facility scoped. Confirmed feedback slightly boosts
+the same scoped profile/trial in ranking, while rejected feedback slightly
+penalizes it.
 
 ## Development
 
@@ -162,6 +230,17 @@ uv run clinical-trial-agent run ./patient_profile.json
 
 Coverage is gated at **75%** in CI.
 
+Run offline clinical evaluation with synthetic fixtures:
+
+```bash
+make eval
+```
+
+The reports are written to `evaluation/reports/latest_eval_report.json` and
+`evaluation/reports/latest_eval_report.md`. See `evaluation/README.md` for
+metric definitions, thresholds, prompt-injection checks, and calibration
+interpretation.
+
 ## Docker and Dev Containers
 
 - `docker-compose.yml` starts the application and PostgreSQL locally
@@ -181,6 +260,26 @@ Exported graphs:
 - `eligibility`
 - `synthesis`
 
+## ClinicalTrials.gov Proxy
+
+The agent retrieves clinical trial data through a lightweight PHI-safe proxy
+(`ctgov_proxy.py`). The proxy is **auto-managed** by the CLI:
+
+- If `CTGOV_PROXY_URL` is set (e.g. `http://localhost:8000/ctgov/search`), the
+  CLI probes its `/healthz` endpoint before each run. If unreachable, it
+  automatically spawns `uvicorn ctgov_proxy:app` on the configured host/port.
+- If `CTGOV_PROXY_URL` is **not set**, the CLI defaults to
+  `http://127.0.0.1:8321/ctgov/search` and starts the proxy there.
+- The proxy subprocess is terminated via `atexit` when the CLI exits.
+
+To start the proxy manually (e.g. for development or shared use):
+
+```bash
+uv run uvicorn ctgov_proxy:app --host 127.0.0.1 --port 8000
+```
+
+If the proxy is already running when the CLI starts, it is reused as-is.
+
 ## Project Layout
 
 ```text
@@ -190,6 +289,7 @@ models/                    Pydantic models
 prompts/                   Prompt templates
 tools/                     Cache, retry, DB, validation, and telemetry helpers
 clinical_trial_agent/      CLI, config, memory, and pipeline entrypoints
+ctgov_proxy.py             Minimal PHI-safe proxy for ClinicalTrials.gov
 tests/                     Unit and integration tests
 ```
 
