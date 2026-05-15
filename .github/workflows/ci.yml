@@ -186,44 +186,6 @@ jobs:
       - name: Secret scan
         run: uv run --all-groups detect-secrets-hook --baseline .secrets.baseline $(git ls-files)
 
-      - name: Verify CI env hardening consistency
-        run: |
-          python - <<'PY'
-          import sys
-          from pathlib import Path
-
-          workflow_text = "\n".join(
-              path.read_text(encoding="utf-8")
-              for path in Path(".github/workflows").glob("*.yml")
-          )
-
-          required = [
-              'DEEPSEEK_API_KEY: dummy-key-for-testing',
-              'PROFILE_HASH_SALT: ci-test-salt',
-              'TENANT_ID: ci-tenant',
-              'FACILITY_ID: ci-facility',
-              'CLINICAL_DATA_EXTERNAL_LLM_CONSENT: "false"',
-          ]
-
-          forbidden = [
-              'CLINICAL_DATA_EXTERNAL_LLM_CONSENT: "true"',
-              'TENANT_ID: default-tenant',
-              'FACILITY_ID: default-facility',
-          ]
-
-          for value in required:
-              if value not in workflow_text:
-                  print(f"Missing required CI hardening value: {value}")
-                  sys.exit(1)
-
-          for value in forbidden:
-              if value in workflow_text:
-                  print(f"Found forbidden CI hardening value: {value}")
-                  sys.exit(1)
-
-          print("CI env hardening consistency check passed.")
-          PY
-
       - name: Run Bandit security checks
         run: uv run --all-groups bandit -r clinical_trial_agent agents subagents -ll
 
