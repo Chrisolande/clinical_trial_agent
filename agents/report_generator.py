@@ -38,7 +38,9 @@ def _sanitize_qa_remediation(qa_remediation: dict[str, Any] | None) -> dict[str,
     return {
         "attempts": int(qa_remediation.get("attempts", 0) or 0),
         "actions": list(qa_remediation.get("actions") or []),
-        "unresolved_issues": _normalize_qa_issues(list(qa_remediation.get("unresolved_issues") or [])),
+        "unresolved_issues": _normalize_qa_issues(
+            list(qa_remediation.get("unresolved_issues") or [])
+        ),
     }
 
 
@@ -102,7 +104,9 @@ def _build_report_payload(
 ) -> dict[str, Any]:
     strong, moderate, weak, disqualified = _partition_trials(enriched_trials)
     retrieval_failed = bool(retrieval_errors) and len(enriched_trials) == 0
-    report_plan_dict = report_plan.model_dump() if hasattr(report_plan, "model_dump") else dict(report_plan)
+    report_plan_dict = (
+        report_plan.model_dump() if hasattr(report_plan, "model_dump") else dict(report_plan)
+    )
     effective_summary = str(report_plan_dict.get("executive_summary", ""))
     patient_summary = str(report_plan_dict.get("patient_summary", ""))
     if retrieval_failed:

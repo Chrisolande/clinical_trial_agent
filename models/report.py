@@ -26,9 +26,7 @@ class TrialReportCard(BaseModel):
     key_uncertainties: list[str] = Field(
         description="Important missing confirmations needed before enrollment."
     )
-    next_action: str = Field(
-        description="The most useful next clinical action for this trial."
-    )
+    next_action: str = Field(description="The most useful next clinical action for this trial.")
     evidence_summary: str = Field(
         description="Short evidence-based explanation of the match assessment."
     )

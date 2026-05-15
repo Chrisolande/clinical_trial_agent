@@ -1,4 +1,4 @@
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
 
 from clinical_trial_agent.config import TIER_ORDER
 
@@ -33,7 +33,16 @@ async def run_qa_check(
         )
     issues.extend(_check_score_verdict_alignment(eligibility_verdicts, scored_trials))
     issues.extend(_check_age_consistency(patient_profile, eligibility_verdicts))
-    issues.extend(check_additional_quality_rules(eligibility_verdicts, scored_trials, _issue))
+    issues.extend(
+        cast(
+            "list[QAIssue]",
+            check_additional_quality_rules(
+                eligibility_verdicts,
+                scored_trials,
+                cast("Any", _issue),
+            ),
+        )
+    )
     qa_passed = not any(_is_blocking_issue(issue) for issue in issues)
     return {"qa_passed": qa_passed, "qa_issues": issues}
 
@@ -84,7 +93,9 @@ def _extract_age_verdicts(
     for trial_id, verdict_data in eligibility_verdicts.items():
         for verdict in verdict_data.get("verdicts", []):
             text_lower = str(verdict.get("criterion_text", "")).lower()
-            if "age" in text_lower and ("years" in text_lower or "≥" in text_lower or ">=" in text_lower):
+            if "age" in text_lower and (
+                "years" in text_lower or "≥" in text_lower or ">=" in text_lower
+            ):
                 age_verdicts.append((trial_id, str(verdict.get("verdict", "UNCERTAIN"))))
     return age_verdicts
 

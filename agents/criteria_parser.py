@@ -119,9 +119,7 @@ def _extract_json_object(text: str) -> dict[str, Any]:
         end = cleaned.rfind("}")
 
         if start == -1 or end == -1 or end <= start:
-            raise ValueError(
-                f"No JSON object found in LLM output: {cleaned[:500]}"
-            ) from None
+            raise ValueError(f"No JSON object found in LLM output: {cleaned[:500]}") from None
 
         parsed = json.loads(cleaned[start : end + 1])
 

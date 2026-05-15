@@ -1,6 +1,7 @@
 import asyncio
 import json
 from collections import Counter
+from collections.abc import Sequence
 from typing import Any
 
 from langchain_core.prompts import ChatPromptTemplate
@@ -141,14 +142,12 @@ def _serialize(value: Any) -> str:
 
 
 def _retrieval_failed_with_zero_trials(
-    scored_trials: list[dict[str, Any]], qa_issues: list[dict[str, Any] | str]
+    scored_trials: list[dict[str, Any]], qa_issues: Sequence[dict[str, Any] | str]
 ) -> bool:
     if scored_trials:
         return False
     issue_codes = {
-        str(issue.get("code", "")).strip()
-        for issue in qa_issues
-        if isinstance(issue, dict)
+        str(issue.get("code", "")).strip() for issue in qa_issues if isinstance(issue, dict)
     }
     return "RETRIEVAL_FAILED_EMPTY_RESULT" in issue_codes
 
@@ -172,10 +171,13 @@ async def generate_report_plan(
     scored_trials: list[dict[str, Any]],
     eligibility_verdicts: dict[str, dict[str, Any]],
     missing_info: list[dict[str, Any]],
-    qa_issues: list[dict[str, Any] | str],
+    qa_issues: Sequence[dict[str, Any] | str],
 ) -> ReportPlan:
     key_concerns = [
-        {"trial_id": str(trial.get("trial_id", "")), "key_concern": str(trial.get("key_concern", ""))}
+        {
+            "trial_id": str(trial.get("trial_id", "")),
+            "key_concern": str(trial.get("key_concern", "")),
+        }
         for trial in scored_trials
         if str(trial.get("key_concern", "")).strip()
     ]

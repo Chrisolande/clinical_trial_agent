@@ -59,13 +59,22 @@ def _extract_age_bound(text: str) -> tuple[int | None, int | None]:
 
 def _keyword_reason_mappings() -> tuple[tuple[tuple[str, ...], str], ...]:
     return (
-        (("ecog", "karnofsky", "performance status"), "Missing ECOG/performance status documentation"),
+        (
+            ("ecog", "karnofsky", "performance status"),
+            "Missing ECOG/performance status documentation",
+        ),
         (("creatinine", "egfr", "renal"), "Missing renal function labs (creatinine/eGFR)"),
         (("ast", "alt", "bilirubin", "liver"), "Missing liver function labs (AST/ALT/bilirubin)"),
-        (("anc", "hemoglobin", "platelet", "cbc", "hematolog"), "Missing CBC/hematology labs (ANC/Hb/platelets)"),
+        (
+            ("anc", "hemoglobin", "platelet", "cbc", "hematolog"),
+            "Missing CBC/hematology labs (ANC/Hb/platelets)",
+        ),
         (("ldh",), "Missing LDH value"),
         (("braf", "pd-l1", "biomarker", "mutation"), "Missing molecular biomarker result"),
-        (("recist", "measurable lesion", "imaging", "measurable disease"), "Missing baseline imaging/measurable disease assessment"),
+        (
+            ("recist", "measurable lesion", "imaging", "measurable disease"),
+            "Missing baseline imaging/measurable disease assessment",
+        ),
         (("histology", "pathology", "diagnosis"), "Missing pathology/diagnosis confirmation"),
         (("bleeding", "hemorrhage"), "Missing recent bleeding history"),
         (("cardiac", "ecg", "echo"), "Missing cardiac history/assessment"),
@@ -78,7 +87,11 @@ def missing_reason_from_criterion(text: str, *, exclusion: bool = False) -> str:
     for keywords, message in _keyword_reason_mappings():
         if any(keyword in lowered for keyword in keywords):
             return message
-    return "Missing trial-specific clinical detail" if not exclusion else "Missing exclusion-history detail"
+    return (
+        "Missing trial-specific clinical detail"
+        if not exclusion
+        else "Missing exclusion-history detail"
+    )
 
 
 def _assess_inclusion_age(lowered: str, age: Any) -> tuple[str, str] | None:
@@ -102,10 +115,31 @@ def _assess_inclusion_melanoma(lowered: str, profile_blob_text: str) -> tuple[st
 
 def _extract_biomarker_targets(lowered: str) -> set[str]:
     markers = (
-        "alk", "braf", "brca1", "brca2", "egfr", "erbb2", "fgfr", "her2", "idh1", "idh2",
-        "kras", "met", "msi", "ntrk", "pd-l1", "pik3ca", "ret", "ros1", "tmb",
+        "alk",
+        "braf",
+        "brca1",
+        "brca2",
+        "egfr",
+        "erbb2",
+        "fgfr",
+        "her2",
+        "idh1",
+        "idh2",
+        "kras",
+        "met",
+        "msi",
+        "ntrk",
+        "pd-l1",
+        "pik3ca",
+        "ret",
+        "ros1",
+        "tmb",
     )
-    return {marker for marker in markers if re.search(rf"(?<![a-z0-9]){re.escape(marker)}(?![a-z0-9])", lowered)}
+    return {
+        marker
+        for marker in markers
+        if re.search(rf"(?<![a-z0-9]){re.escape(marker)}(?![a-z0-9])", lowered)
+    }
 
 
 def _has_explicit_molecular_evidence(biomarker_blob_text: str) -> bool:
@@ -130,13 +164,17 @@ def _is_generic_mutation_criterion(lowered: str) -> bool:
     return "mutation" in lowered or "molecular" in lowered or "genomic" in lowered
 
 
-def _assess_targeted_biomarker(criterion_targets: set[str], biomarker_blob_text: str) -> tuple[str, str]:
+def _assess_targeted_biomarker(
+    criterion_targets: set[str], biomarker_blob_text: str
+) -> tuple[str, str]:
     if _any_biomarker_target_present(criterion_targets, biomarker_blob_text):
         return "MEETS", "Criterion-specific biomarker evidence exists in profile"
     return "UNCERTAIN", "Criterion-specific biomarker result missing"
 
 
-def _assess_inclusion_biomarker(lowered: str, patient_profile: dict[str, Any]) -> tuple[str, str] | None:
+def _assess_inclusion_biomarker(
+    lowered: str, patient_profile: dict[str, Any]
+) -> tuple[str, str] | None:
     biomarker_keywords = ("braf", "pd-l1", "biomarker", "mutation", "molecular", "genomic")
     if not any(keyword in lowered for keyword in biomarker_keywords):
         return None
@@ -145,13 +183,18 @@ def _assess_inclusion_biomarker(lowered: str, patient_profile: dict[str, Any]) -
     if criterion_targets:
         return _assess_targeted_biomarker(criterion_targets, biomarker_blob_text)
     if _is_generic_mutation_criterion(lowered):
-        return "UNCERTAIN", "Criterion requires specific biomarker target; generic mutation evidence is insufficient"
+        return (
+            "UNCERTAIN",
+            "Criterion requires specific biomarker target; generic mutation evidence is insufficient",
+        )
     if "biomarker" in lowered and _has_explicit_molecular_evidence(biomarker_blob_text):
         return "MEETS", "Biomarker evidence exists in profile"
     return "UNCERTAIN", "Required biomarker information missing"
 
 
-def _assess_inclusion_performance(lowered: str, patient_profile: dict[str, Any]) -> tuple[str, str] | None:
+def _assess_inclusion_performance(
+    lowered: str, patient_profile: dict[str, Any]
+) -> tuple[str, str] | None:
     if not any(keyword in lowered for keyword in ("ecog", "performance status", "karnofsky")):
         return None
     if patient_profile.get("ecog_performance_status") is not None:
@@ -159,7 +202,9 @@ def _assess_inclusion_performance(lowered: str, patient_profile: dict[str, Any])
     return "UNCERTAIN", "Performance status missing"
 
 
-def assess_inclusion(text: str, patient_profile: dict[str, Any], profile_blob_text: str) -> tuple[str, str]:
+def assess_inclusion(
+    text: str, patient_profile: dict[str, Any], profile_blob_text: str
+) -> tuple[str, str]:
     lowered = text.lower()
     not_applicable = _sex_specific_not_applicable(lowered, patient_profile)
     if not_applicable is not None:
@@ -179,7 +224,9 @@ def assess_inclusion(text: str, patient_profile: dict[str, Any], profile_blob_te
     return "UNCERTAIN", missing_reason_from_criterion(text, exclusion=False)
 
 
-def assess_exclusion(text: str, patient_profile: dict[str, Any], profile_blob_text: str) -> tuple[str, str]:
+def assess_exclusion(
+    text: str, patient_profile: dict[str, Any], profile_blob_text: str
+) -> tuple[str, str]:
     lowered = text.lower()
     not_applicable = _sex_specific_not_applicable(lowered, patient_profile)
     if not_applicable is not None:

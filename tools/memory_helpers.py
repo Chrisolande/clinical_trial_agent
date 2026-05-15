@@ -4,7 +4,7 @@ import base64
 import json
 import os
 from contextlib import AbstractAsyncContextManager
-from typing import Any
+from typing import Any, cast
 
 from cryptography.fernet import Fernet, InvalidToken
 from loguru import logger
@@ -92,9 +92,7 @@ def get_fernet_key() -> bytes:
 
 
 def serialize_encrypted_json(payload: dict[str, Any], fernet: Fernet) -> str:
-    encrypted = fernet.encrypt(
-        json.dumps(payload, default=str).encode("utf-8")
-    ).decode("utf-8")
+    encrypted = fernet.encrypt(json.dumps(payload, default=str).encode("utf-8")).decode("utf-8")
     return str(encrypted)
 
 
@@ -140,7 +138,10 @@ def get_checkpointer(
         return None
 
     try:
-        return AsyncPostgresSaver.from_conn_string(active_dsn)
+        return cast(
+            "AbstractAsyncContextManager[Any, bool | None] | None",
+            AsyncPostgresSaver.from_conn_string(active_dsn),
+        )
     except Exception as exc:
         logger.exception(
             "Failed to create PostgreSQL checkpointer context manager: {}",

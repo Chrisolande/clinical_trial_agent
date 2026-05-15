@@ -8,7 +8,7 @@ from tools.retry import llm_retry
 
 from clinical_trial_agent.config import TIER_ORDER, get_llm
 
-from .eligibility_fallback import FALLBACK_VERDICT, fallback_verdict_for_exception, validate_verdict
+from .eligibility_fallback import fallback_verdict_for_exception, validate_verdict
 from .eligibility_prompt_builder import build_judge_messages
 
 
@@ -21,12 +21,15 @@ async def _judge_trial(
     llm = get_llm(contains_phi=False, node_name="eligibility_judge")
     trial_id = str(trial.get("nct_id", "unknown"))
     messages = build_judge_messages(patient_profile, trial, criteria)
-    
+
     if hasattr(llm, "with_structured_output"):
         structured_llm = llm.with_structured_output(JudgeVerdict)
         response = await structured_llm.ainvoke(
             messages,
-            config={"run_name": "eligibility_judge_structured", "tags": ["eligibility", "judge"]},
+            config={
+                "run_name": "eligibility_judge_structured",
+                "tags": ["eligibility", "judge"],
+            },
         )
         if isinstance(response, JudgeVerdict):
             return response
@@ -34,17 +37,24 @@ async def _judge_trial(
             return validate_verdict(response, trial_id)
 
     # Fallback to raw JSON parse if structured output returns None
-    logger.info("Structured output failed or returned None for {}, trying raw JSON fallback", trial_id)
+    logger.info(
+        "Structured output failed or returned None for {}, trying raw JSON fallback",
+        trial_id,
+    )
     response = await llm.ainvoke(
         messages,
-        config={"run_name": "eligibility_judge_raw", "tags": ["eligibility", "judge", "raw"]},
+        config={
+            "run_name": "eligibility_judge_raw",
+            "tags": ["eligibility", "judge", "raw"],
+        },
     )
-    
+
     content = getattr(response, "content", None)
     if isinstance(content, dict):
         return validate_verdict(content, trial_id)
     if isinstance(content, str):
         import re
+
         cleaned = content.strip()
         if cleaned.startswith("```"):
             cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
@@ -55,7 +65,9 @@ async def _judge_trial(
             if isinstance(parsed, dict):
                 # Raw string responses (even valid JSON) should be treated as unstructured
                 # to avoid accepting high-trust outputs from non-structured providers.
-                return fallback_verdict_for_exception(Exception("LLM parsing failed"), trial_id, patient_profile, criteria)
+                return fallback_verdict_for_exception(
+                    Exception("LLM parsing failed"), trial_id, patient_profile, criteria
+                )
         except (json.JSONDecodeError, TypeError, ValueError):
             # One more attempt to extract json block
             start = cleaned.find("{")
@@ -68,7 +80,11 @@ async def _judge_trial(
                 except Exception:
                     pass
 
-    logger.warning("Eligibility judge raw fallback failed to parse for {}. Content: {}", trial_id, content)
+    logger.warning(
+        "Eligibility judge raw fallback failed to parse for {}. Content: {}",
+        trial_id,
+        content,
+    )
 
     logger.warning(
         "Eligibility judge returned non-structured response for {}: {}",
@@ -76,7 +92,9 @@ async def _judge_trial(
         type(response).__name__,
     )
     # Treat non-structured responses as a parsing failure to get a consistent fallback
-    return fallback_verdict_for_exception(Exception("LLM parsing failed"), trial_id, patient_profile, criteria)
+    return fallback_verdict_for_exception(
+        Exception("LLM parsing failed"), trial_id, patient_profile, criteria
+    )
 
 
 def _build_verdict_rows(verdict: JudgeVerdict) -> list[dict[str, Any]]:
@@ -219,7 +237,11 @@ def _apply_sparse_evidence_caps(
     hard_exclusion_failures: int,
 ) -> tuple[str, float, dict[str, Any]]:
     if hard_exclusion_failures > 0:
-        return "disqualified", 0.0, {"sparse_evidence_cap_applied": False, "sparse_evidence_cap_reason": None}
+        return (
+            "disqualified",
+            0.0,
+            {"sparse_evidence_cap_applied": False, "sparse_evidence_cap_reason": None},
+        )
 
     tier = verdict.match_tier
     score = verdict.match_score
@@ -234,26 +256,49 @@ def _apply_sparse_evidence_caps(
     if total_count == 0:
         if TIER_ORDER[tier] > TIER_ORDER["weak"]:
             tier = "weak"
-            metadata.update({"sparse_evidence_cap_applied": True, "sparse_evidence_cap_reason": "total_count == 0"})
+            metadata.update(
+                {
+                    "sparse_evidence_cap_applied": True,
+                    "sparse_evidence_cap_reason": "total_count == 0",
+                }
+            )
         return tier, min(score, 0.25), metadata
 
     if assessed_count <= 1:
         if verdict.major_criteria_assessable and TIER_ORDER[tier] >= TIER_ORDER["moderate"]:
             tier = "moderate"
-            metadata.update({"sparse_evidence_cap_applied": True, "sparse_evidence_cap_reason": "assessed_count <= 1 with major criteria met"})
+            metadata.update(
+                {
+                    "sparse_evidence_cap_applied": True,
+                    "sparse_evidence_cap_reason": "assessed_count <= 1 with major criteria met",
+                }
+            )
             return tier, min(score, 0.55), metadata
         else:
             if TIER_ORDER[tier] > TIER_ORDER["weak"]:
                 tier = "weak"
-                metadata.update({"sparse_evidence_cap_applied": True, "sparse_evidence_cap_reason": "assessed_count <= 1"})
+                metadata.update(
+                    {
+                        "sparse_evidence_cap_applied": True,
+                        "sparse_evidence_cap_reason": "assessed_count <= 1",
+                    }
+                )
             return tier, min(score, 0.45), metadata
 
-    if assessed_count >= 2 and hard_exclusion_failures == 0:
-        # If strong but high uncertainty remains, downgrade to moderate
-        if tier == "strong" and uncertain_count > assessed_count:
-            tier = "moderate"
-            metadata.update({"sparse_evidence_cap_applied": True, "sparse_evidence_cap_reason": "uncertain_count > assessed_count"})
-            return tier, min(score, 0.65), metadata
+    if (
+        assessed_count >= 2
+        and hard_exclusion_failures == 0
+        and tier == "strong"
+        and uncertain_count > assessed_count
+    ):
+        tier = "moderate"
+        metadata.update(
+            {
+                "sparse_evidence_cap_applied": True,
+                "sparse_evidence_cap_reason": "uncertain_count > assessed_count",
+            }
+        )
+        return tier, min(score, 0.65), metadata
 
     return tier, score, metadata
 

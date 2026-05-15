@@ -123,7 +123,9 @@ def project_patient_summary(patient_profile: dict[str, Any]) -> PatientSummary:
 
 def project_trial_summary(trial: dict[str, Any]) -> TrialSummary:
     settings = get_settings()
-    criteria_text = str(trial.get("eligibility_criteria_raw", ""))[: settings.criteria_text_max_chars]
+    criteria_text = str(trial.get("eligibility_criteria_raw", ""))[
+        : settings.criteria_text_max_chars
+    ]
     return {
         "nct_id": str(trial.get("nct_id", "")),
         "brief_title": str(trial.get("brief_title", "")),

@@ -52,7 +52,7 @@ def test_strip_json_fences_removes_code_block() -> None:
 
 
 def test_extract_json_object_parses_wrapped() -> None:
-    text = "LLM output: {\"inclusion_criteria\": [], \"exclusion_criteria\": []}"
+    text = 'LLM output: {"inclusion_criteria": [], "exclusion_criteria": []}'
     parsed = criteria_parser._extract_json_object(text)
     assert parsed == {"inclusion_criteria": [], "exclusion_criteria": []}
 

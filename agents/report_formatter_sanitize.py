@@ -1,5 +1,5 @@
 import re
-from typing import Any
+from typing import Any, cast
 
 _LOW_VALUE_PLACEHOLDERS = {
     "criterion requires details not present in profile",
@@ -89,10 +89,18 @@ def _dedupe_info_gaps(info_gaps: list[Any]) -> list[dict[str, Any]]:
             continue
         field_id = str(item.get("field_id", "")).strip().lower()
         field = _sanitize_public_text(
-            str(item.get("item") or item.get("field") or item.get("display_name") or item.get("field_id") or "").strip()
+            str(
+                item.get("item")
+                or item.get("field")
+                or item.get("display_name")
+                or item.get("field_id")
+                or ""
+            ).strip()
         )
         desc = _sanitize_public_text(
-            str(item.get("reason") or item.get("description") or item.get("why_needed") or "").strip()
+            str(
+                item.get("reason") or item.get("description") or item.get("why_needed") or ""
+            ).strip()
         )
         if (not field and not desc) or _is_low_value_placeholder(field, desc):
             continue
@@ -119,19 +127,27 @@ def _dedupe_info_gaps(info_gaps: list[Any]) -> list[dict[str, Any]]:
             continue
         deduped[key] = {
             "field_id": field_id or key,
-            "item": field or str(item.get("item") or item.get("field") or item.get("display_name") or "").strip(),
+            "item": field
+            or str(item.get("item") or item.get("field") or item.get("display_name") or "").strip(),
             "field": field or str(item.get("field") or item.get("display_name") or "").strip(),
             "description": desc,
             "reason": desc,
             "priority": str(item.get("priority", "medium")).lower(),
-            "affected_trial_ids": sorted(set(item.get("affected_trial_ids") or item.get("affects_trials") or [])),
-            "affects_trials": sorted(set(item.get("affected_trial_ids") or item.get("affects_trials") or [])),
+            "affected_trial_ids": sorted(
+                set(item.get("affected_trial_ids") or item.get("affects_trials") or [])
+            ),
+            "affects_trials": sorted(
+                set(item.get("affected_trial_ids") or item.get("affects_trials") or [])
+            ),
             "action": _sanitize_public_text(str(item.get("action", "")).strip()),
             "applicable_to_patient": bool(item.get("applicable_to_patient", True)),
         }
     ordered = sorted(
         deduped.values(),
-        key=lambda x: (_priority_rank(str(x.get("priority", "low"))), len(str(x.get("description", "")))),
+        key=lambda x: (
+            _priority_rank(str(x.get("priority", "low"))),
+            len(str(x.get("description", ""))),
+        ),
         reverse=True,
     )
     output: list[dict[str, Any]] = []
@@ -164,12 +180,14 @@ def _extract_report_plan(report_json: dict[str, Any]) -> dict[str, Any]:
     plan = report_json.get("report_plan")
     if isinstance(plan, dict):
         return plan
-    if hasattr(plan, "model_dump"):
-        return plan.model_dump()
+    if plan is not None and hasattr(plan, "model_dump"):
+        return cast("dict[str, Any]", plan.model_dump())
     return {}
 
 
-def _cards_from_plan_or_matches(report_json: dict[str, Any], plan: dict[str, Any]) -> list[dict[str, Any]]:
+def _cards_from_plan_or_matches(
+    report_json: dict[str, Any], plan: dict[str, Any]
+) -> list[dict[str, Any]]:
     strong = plan.get("strong_matches", [])
     moderate = plan.get("moderate_matches", [])
     if isinstance(strong, list) and isinstance(moderate, list) and (strong or moderate):
@@ -181,4 +199,6 @@ def _cards_from_plan_or_matches(report_json: dict[str, Any], plan: dict[str, Any
     ranked = report_json.get("ranked_trials", [])
     if isinstance(ranked, list) and ranked:
         return [trial for trial in ranked if isinstance(trial, dict)]
-    return list(report_json.get("strong_matches", [])) + list(report_json.get("moderate_matches", []))
+    return list(report_json.get("strong_matches", [])) + list(
+        report_json.get("moderate_matches", [])
+    )

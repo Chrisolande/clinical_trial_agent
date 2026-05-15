@@ -98,7 +98,9 @@ def _gaps_from_scored_trial(trial: dict[str, Any]) -> list[dict[str, Any]]:
     gaps: list[dict[str, Any]] = []
     for item in trial.get("critical_missing_info", []) or []:
         raw_item = str(item).strip()
-        if not raw_item or _is_not_applicable_gap({"description": raw_item, "field": raw_item, "category": ""}):
+        if not raw_item or _is_not_applicable_gap(
+            {"description": raw_item, "field": raw_item, "category": ""}
+        ):
             continue
         normalized = _normalize_gap_item(raw_item)
         gaps.append(_gap_payload(normalized, raw_item, tier, trial_id))
@@ -236,7 +238,10 @@ def sanitize_information_gaps(gaps: list[dict[str, Any]]) -> list[dict[str, Any]
         sanitized.append(normalized)
     ordered = sorted(
         sanitized,
-        key=lambda x: (_priority_rank(str(x.get("priority", "low"))), len(str(x.get("description", "")))),
+        key=lambda x: (
+            _priority_rank(str(x.get("priority", "low"))),
+            len(str(x.get("description", ""))),
+        ),
         reverse=True,
     )
     return _limit_public_low_priority_gaps(ordered)

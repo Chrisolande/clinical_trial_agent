@@ -11,7 +11,9 @@ from .report_formatter_sanitize import (
 def _render_ranking_row(trial: dict[str, Any]) -> str:
     nct = str(trial.get("nct_id") or trial.get("trial_id") or "N/A")
     title = str(trial.get("title") or trial.get("brief_title") or "Untitled")
-    reason = str(trial.get("evidence_summary") or trial.get("rationale") or trial.get("key_concern") or "").strip()
+    reason = str(
+        trial.get("evidence_summary") or trial.get("rationale") or trial.get("key_concern") or ""
+    ).strip()
     action = str(trial.get("next_action") or "").strip()
     reason_text = _sanitize_public_text(reason) or "No concise reason supplied"
     action_text = _sanitize_public_text(action) or "No concrete action supplied"
@@ -33,7 +35,9 @@ def _render_trial_group(cards: list[dict[str, Any]], tier: str, title: str) -> l
         trial_title = str(row.get("title") or row.get("brief_title") or "Untitled")
         phase = str(row.get("phase", "")).strip() or "None"
         status = str(row.get("status", "")).strip() or "Unknown"
-        recommendation = _sanitize_public_text(str(row.get("recommendation") or row.get("rationale") or ""))
+        recommendation = _sanitize_public_text(
+            str(row.get("recommendation") or row.get("rationale") or "")
+        )
         why_it_matches = [
             _sanitize_public_text(str(item))
             for item in list(row.get("why_it_matches") or [])
@@ -87,7 +91,13 @@ def _group_gaps_by_priority(gaps: list[dict[str, Any]]) -> dict[str, list[dict[s
 
 def _gap_field_and_description(item: dict[str, Any]) -> tuple[str, str]:
     field = _sanitize_public_text(
-        str(item.get("item") or item.get("field") or item.get("display_name") or item.get("field_id") or "").strip()
+        str(
+            item.get("item")
+            or item.get("field")
+            or item.get("display_name")
+            or item.get("field_id")
+            or ""
+        ).strip()
     )
     desc = _sanitize_public_text(str(item.get("reason") or item.get("description") or "").strip())
     return field, desc
@@ -115,7 +125,9 @@ def _render_gap_priority_group(severity: str, items: list[dict[str, Any]]) -> li
 
 
 def _render_information_gaps(info_gaps: list[dict[str, Any]]) -> list[str]:
-    cleaned = [gap for gap in _dedupe_info_gaps(info_gaps) if bool(gap.get("applicable_to_patient", True))]
+    cleaned = [
+        gap for gap in _dedupe_info_gaps(info_gaps) if bool(gap.get("applicable_to_patient", True))
+    ]
     lines = ["CRITICAL INFORMATION GAPS", "-" * 40]
     if not cleaned:
         lines.extend(["None identified after sanitization.", ""])
@@ -126,14 +138,18 @@ def _render_information_gaps(info_gaps: list[dict[str, Any]]) -> list[str]:
     return lines
 
 
-def _render_next_actions(info_gaps: list[dict[str, Any]], recommended_actions: list[dict[str, Any]]) -> list[str]:
+def _render_next_actions(
+    info_gaps: list[dict[str, Any]], recommended_actions: list[dict[str, Any]]
+) -> list[str]:
     cleaned = [
         gap
         for gap in _dedupe_info_gaps(recommended_actions or info_gaps)
         if bool(gap.get("applicable_to_patient", True))
     ]
     lines = ["RECOMMENDED CLINICAL NEXT ACTIONS", "-" * 40]
-    actionable = [gap for gap in cleaned if str(gap.get("priority", "medium")).lower() in {"high", "medium"}]
+    actionable = [
+        gap for gap in cleaned if str(gap.get("priority", "medium")).lower() in {"high", "medium"}
+    ]
     if not actionable:
         lines.extend(["No immediate actions.", ""])
         return lines
@@ -142,7 +158,9 @@ def _render_next_actions(info_gaps: list[dict[str, Any]], recommended_actions: l
         field, desc = _gap_field_and_description(item)
         if _is_low_value_placeholder(field, desc):
             continue
-        trials = ", ".join(list(item.get("affects_trials") or item.get("affected_trial_ids") or [])[:3])
+        trials = ", ".join(
+            list(item.get("affects_trials") or item.get("affected_trial_ids") or [])[:3]
+        )
         action = _sanitize_public_text(str(item.get("action", "")).strip())
         if not action:
             action = f"Obtain {field or 'missing clinical detail'}."
@@ -177,7 +195,9 @@ def _render_debug_sections(report_json: dict[str, Any]) -> list[str]:
     if not bool(report_json.get("debug", False)):
         return []
     qa_issues = report_json.get("qa_issues_internal", report_json.get("qa_issues", []))
-    qa_remediation = report_json.get("qa_remediation_internal", report_json.get("qa_remediation", {}))
+    qa_remediation = report_json.get(
+        "qa_remediation_internal", report_json.get("qa_remediation", {})
+    )
     lines: list[str] = []
     if qa_issues:
         lines.extend(["QA ISSUES", "-" * 40])
@@ -212,7 +232,9 @@ def _render_debug_sections(report_json: dict[str, Any]) -> list[str]:
     return lines
 
 
-def _render_methodology_and_limitations(report_json: dict[str, Any], plan: dict[str, Any]) -> list[str]:
+def _render_methodology_and_limitations(
+    report_json: dict[str, Any], plan: dict[str, Any]
+) -> list[str]:
     methodology = _sanitize_public_text(str(report_json.get("methodology_note", "")).strip())
     limitations = [
         _sanitize_public_text(str(item))

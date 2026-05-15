@@ -54,8 +54,18 @@ def test_build_text_report_suppresses_not_applicable_gaps() -> None:
         "excluded_trial_count": 0,
         "excluded_trials": [],
         "information_gaps": [
-            {"field_id": "not_applicable_pregnancy", "field": "Pregnancy status", "description": "Not applicable for male patient", "priority": "high"},
-            {"field_id": "egfr_mutation_status", "field": "EGFR mutation status", "description": "Needed for selection", "priority": "high"},
+            {
+                "field_id": "not_applicable_pregnancy",
+                "field": "Pregnancy status",
+                "description": "Not applicable for male patient",
+                "priority": "high",
+            },
+            {
+                "field_id": "egfr_mutation_status",
+                "field": "EGFR mutation status",
+                "description": "Needed for selection",
+                "priority": "high",
+            },
         ],
         "methodology_note": "method",
         "search_queries_used": [],
@@ -73,7 +83,9 @@ def test_build_text_report_suppresses_not_applicable_gaps() -> None:
 async def test_attempt_fix_recompute_from_verdicts() -> None:
     out = await synthesis_nodes.attempt_qa_fix(
         {
-            "qa_issues": [{"code": "HARD_EXCLUSION_RANKING_CONFLICT", "severity": "critical", "message": "x"}],
+            "qa_issues": [
+                {"code": "HARD_EXCLUSION_RANKING_CONFLICT", "severity": "critical", "message": "x"}
+            ],
             "qa_fix_attempts": 0,
             "trial_scores": [{"trial_id": "T1", "tier": "moderate", "score": 0.91}],
             "eligibility_verdicts": {"T1": {"hard_exclusion_failures": 1}},
@@ -87,7 +99,13 @@ async def test_attempt_fix_recompute_from_verdicts() -> None:
 async def test_attempt_fix_escalates_retrieval_issue() -> None:
     out = await synthesis_nodes.attempt_qa_fix(
         {
-            "qa_issues": [{"code": "RETRIEVAL_FAILED_EMPTY_RESULT", "severity": "critical", "message": "retrieval empty"}],
+            "qa_issues": [
+                {
+                    "code": "RETRIEVAL_FAILED_EMPTY_RESULT",
+                    "severity": "critical",
+                    "message": "retrieval empty",
+                }
+            ],
             "qa_fix_attempts": 0,
             "trial_scores": [],
         }
@@ -137,19 +155,66 @@ async def test_synthesis_tier_ordering_and_exclusion(monkeypatch: pytest.MonkeyP
     async def fake_build_report(**kwargs):
         scored = kwargs.get("scored_trials", [])
         filtered = [t for t in scored if t.get("tier") in {"strong", "moderate"}]
-        ordered = sorted(filtered, key=lambda t: {"strong": 2, "moderate": 1}[t["tier"]], reverse=True)
+        ordered = sorted(
+            filtered, key=lambda t: {"strong": 2, "moderate": 1}[t["tier"]], reverse=True
+        )
         return {"ordered_titles": [t["brief_title"] for t in ordered]}
 
     monkeypatch.setattr(synthesis_nodes.report_generator, "build_report", fake_build_report)
-    monkeypatch.setattr(synthesis_nodes.report_generator, "build_text_report", lambda report: "\n".join(report.get("ordered_titles", [])))
+    monkeypatch.setattr(
+        synthesis_nodes.report_generator,
+        "build_text_report",
+        lambda report: "\n".join(report.get("ordered_titles", [])),
+    )
 
     state = {
         "patient_profile": {"age": 60},
         "trial_scores": [
-            {"trial_id": "W1", "brief_title": "Weak Trial", "tier": "weak", "score": 0.3, "meets_count": 1, "fails_count": 0, "uncertain_count": 10, "overall_status": "RECRUITING", "phase": "PHASE2"},
-            {"trial_id": "S1", "brief_title": "Strong Trial", "tier": "strong", "score": 0.8, "meets_count": 8, "fails_count": 0, "uncertain_count": 1, "overall_status": "RECRUITING", "phase": "PHASE3"},
-            {"trial_id": "D1", "brief_title": "DQ Trial", "tier": "disqualified", "score": 0.0, "meets_count": 0, "fails_count": 2, "uncertain_count": 0, "overall_status": "RECRUITING", "phase": "PHASE1"},
-            {"trial_id": "M1", "brief_title": "Moderate Trial", "tier": "moderate", "score": 0.6, "meets_count": 5, "fails_count": 1, "uncertain_count": 3, "overall_status": "RECRUITING", "phase": "PHASE2", "key_concern": "missing stage"},
+            {
+                "trial_id": "W1",
+                "brief_title": "Weak Trial",
+                "tier": "weak",
+                "score": 0.3,
+                "meets_count": 1,
+                "fails_count": 0,
+                "uncertain_count": 10,
+                "overall_status": "RECRUITING",
+                "phase": "PHASE2",
+            },
+            {
+                "trial_id": "S1",
+                "brief_title": "Strong Trial",
+                "tier": "strong",
+                "score": 0.8,
+                "meets_count": 8,
+                "fails_count": 0,
+                "uncertain_count": 1,
+                "overall_status": "RECRUITING",
+                "phase": "PHASE3",
+            },
+            {
+                "trial_id": "D1",
+                "brief_title": "DQ Trial",
+                "tier": "disqualified",
+                "score": 0.0,
+                "meets_count": 0,
+                "fails_count": 2,
+                "uncertain_count": 0,
+                "overall_status": "RECRUITING",
+                "phase": "PHASE1",
+            },
+            {
+                "trial_id": "M1",
+                "brief_title": "Moderate Trial",
+                "tier": "moderate",
+                "score": 0.6,
+                "meets_count": 5,
+                "fails_count": 1,
+                "uncertain_count": 3,
+                "overall_status": "RECRUITING",
+                "phase": "PHASE2",
+                "key_concern": "missing stage",
+            },
         ],
         "eligibility_verdicts": {"S1": {}, "M1": {}, "W1": {}, "D1": {}},
         "missing_info_recommendations": [],

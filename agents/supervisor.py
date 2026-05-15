@@ -39,6 +39,7 @@ def _apply_feedback_adjustments(
 ) -> list[dict[str, Any]]:
     return apply_feedback_adjustments(scored_trials, feedback_rows)
 
+
 class SupervisorOrchestrator:
     def __init__(self, checkpointer: Any | None = None) -> None:
         self._checkpointer = checkpointer
@@ -223,6 +224,7 @@ class SupervisorOrchestrator:
         self, patient_profile: PatientSummary, *, thread_id: str, memory: EpisodicMemory
     ) -> dict[str, Any]:
         return await run_tools_pipeline(self, patient_profile, thread_id=thread_id, memory=memory)
+
 
 @contextlib.asynccontextmanager
 async def compile_supervisor_graph() -> Any:

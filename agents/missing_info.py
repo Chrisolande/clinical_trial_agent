@@ -44,7 +44,11 @@ def _build_uncertain_summary(
                 canonical = to_actionable_field(text)
                 field_id = canonical["field_id"]
                 if field_id not in uncertain_by_field:
-                    uncertain_by_field[field_id] = {**canonical, "affected_trial_ids": [], "examples": []}
+                    uncertain_by_field[field_id] = {
+                        **canonical,
+                        "affected_trial_ids": [],
+                        "examples": [],
+                    }
                 if trial_id not in uncertain_by_field[field_id]["affected_trial_ids"]:
                     uncertain_by_field[field_id]["affected_trial_ids"].append(trial_id)
                 if text and text not in uncertain_by_field[field_id]["examples"]:
@@ -67,7 +71,13 @@ def _build_uncertain_summary(
 
 def _format_profile_summary(profile: dict[str, Any]) -> str:
     redacted_fields = {
-        "age", "sex", "conditions", "primary_condition", "biomarkers", "medications", "prior_treatments"
+        "age",
+        "sex",
+        "conditions",
+        "primary_condition",
+        "biomarkers",
+        "medications",
+        "prior_treatments",
     }
     available: list[str] = []
     for key, value in profile.items():
@@ -86,8 +96,15 @@ async def _invoke_missing_info_llm(
 ) -> CompletenessAssessmentList:
     assert_external_llm_consent()
     result = await _get_chain().ainvoke(
-        {"patient_profile": _format_profile_summary(patient_profile), "trial_verdicts": uncertain_summary},
-        config={"run_name": "missing_info", "tags": ["eligibility", "missing-data"], "timeout": get_settings().llm_call_timeout_seconds},
+        {
+            "patient_profile": _format_profile_summary(patient_profile),
+            "trial_verdicts": uncertain_summary,
+        },
+        config={
+            "run_name": "missing_info",
+            "tags": ["eligibility", "missing-data"],
+            "timeout": get_settings().llm_call_timeout_seconds,
+        },
     )
     if isinstance(result, CompletenessAssessmentList):
         return result
@@ -106,7 +123,9 @@ async def identify_missing_info(
     try:
         result = await _invoke_missing_info_llm(patient_profile, uncertain_summary)
         if result and result.results:
-            return _enrich_with_trial_context([item.model_dump() for item in result.results], uncertain_by_field)
+            return _enrich_with_trial_context(
+                [item.model_dump() for item in result.results], uncertain_by_field
+            )
         logger.info("Missing info model returned no items; using deterministic fallback.")
         return fallback_missing_info_recommendations(uncertain_by_field)
     except TimeoutError:
@@ -154,7 +173,9 @@ def _missing_info_field_id(item: dict[str, Any]) -> str:
 
 def _missing_info_display_name(item: dict[str, Any], context: dict[str, Any], field_id: str) -> str:
     return (
-        str(item.get("display_name") or item.get("field") or context.get("display_name") or "").strip()
+        str(
+            item.get("display_name") or item.get("field") or context.get("display_name") or ""
+        ).strip()
         or field_id.replace("_", " ").title()
     )
 

@@ -38,14 +38,22 @@ async def run_qa_check(state: SynthesisState) -> dict[str, object]:
         return {
             "qa_passed": qa_passed,
             "qa_issues": issues,
-            "new_decision_entries": [f"QA check {'passed' if qa_passed else 'found issues'}: {len(issues)} issue(s)."],
+            "new_decision_entries": [
+                f"QA check {'passed' if qa_passed else 'found issues'}: {len(issues)} issue(s)."
+            ],
         }
     except (ValueError, TypeError, TimeoutError, RuntimeError) as exc:
         label = _exception_label(exc)
         logger.error("run_qa_check failed (fail-closed, {}) : {}", label, exc)
         return {
             "qa_passed": False,
-            "qa_issues": [{"code": "QA_CHECK_ERROR", "severity": "critical", "message": f"QA check error ({label}): {exc}"}],
+            "qa_issues": [
+                {
+                    "code": "QA_CHECK_ERROR",
+                    "severity": "critical",
+                    "message": f"QA check error ({label}): {exc}",
+                }
+            ],
             "new_errors": [f"qa_check[{label}]: {exc}"],
             "new_decision_entries": [f"QA check failed closed: {exc}"],
         }

@@ -39,7 +39,7 @@ async def _is_proxy_reachable(host: str, port: int) -> bool:
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(3.0)) as client:
             response = await client.get(_health_url(host, port))
-            return response.status_code == 200
+            return bool(response.status_code == 200)
     except (httpx.RequestError, httpx.HTTPStatusError):
         return False
 
@@ -128,9 +128,7 @@ async def ensure_proxy() -> None:
         host, port = _DEFAULT_PROXY_HOST, _DEFAULT_PROXY_PORT
         proxy_url = f"http://{host}:{port}/ctgov/search"
         os.environ["CTGOV_PROXY_URL"] = proxy_url
-        logger.info(
-            "CTGOV_PROXY_URL not set - defaulting to {} and auto-starting proxy", proxy_url
-        )
+        logger.info("CTGOV_PROXY_URL not set - defaulting to {} and auto-starting proxy", proxy_url)
     else:
         host, port = _parse_proxy_url(proxy_url)
 

@@ -1,6 +1,6 @@
 import inspect
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from tools.telemetry import trace_span
 
@@ -133,7 +133,7 @@ async def run_retrieval_eligibility_attempt(
             attempt=attempt,
         )
     run_state.scored_trials = compress_scored_trials(list(eligibility.get("trial_scores", [])))
-    return eligibility
+    return cast("dict[str, Any]", eligibility)
 
 
 def build_synthesis_kwargs(
@@ -152,10 +152,14 @@ def build_synthesis_kwargs(
         "missing_info_recommendations": eligibility.get("missing_info_recommendations"),
         "trials_raw": list(run_state.retrieval_result.get("trials_raw", [])),
         "search_queries": list(run_state.retrieval_result.get("search_queries", [])),
-        "decision_history": compress_decision_history(list(eligibility.get("decision_history", []))),
+        "decision_history": compress_decision_history(
+            list(eligibility.get("decision_history", []))
+        ),
         "trials_with_criteria": eligibility.get("trials_with_criteria"),
         "thread_id": thread_id,
     }
     if "retrieval_errors" in inspect.signature(orchestrator.run_synthesis).parameters:
-        synthesis_kwargs["retrieval_errors"] = list(run_state.retrieval_result.get("retrieval_errors", []))
+        synthesis_kwargs["retrieval_errors"] = list(
+            run_state.retrieval_result.get("retrieval_errors", [])
+        )
     return synthesis_kwargs

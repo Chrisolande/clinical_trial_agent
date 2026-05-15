@@ -7,12 +7,22 @@ async def setup_memory_schema(conn: asyncpg.Connection, *, ddl: str, schema_vers
         await conn.execute("ALTER TABLE patient_runs ADD COLUMN IF NOT EXISTS tenant_id TEXT")
         await conn.execute("ALTER TABLE patient_runs ADD COLUMN IF NOT EXISTS facility_id TEXT")
         await conn.execute("ALTER TABLE pipeline_audit_log ADD COLUMN IF NOT EXISTS tenant_id TEXT")
-        await conn.execute("ALTER TABLE pipeline_audit_log ADD COLUMN IF NOT EXISTS facility_id TEXT")
+        await conn.execute(
+            "ALTER TABLE pipeline_audit_log ADD COLUMN IF NOT EXISTS facility_id TEXT"
+        )
         await conn.execute("ALTER TABLE physician_feedback ADD COLUMN IF NOT EXISTS tenant_id TEXT")
-        await conn.execute("ALTER TABLE physician_feedback ADD COLUMN IF NOT EXISTS facility_id TEXT")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_patient_runs_tenant_facility ON patient_runs (tenant_id, facility_id, created_at DESC)")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_pipeline_audit_log_tenant_facility ON pipeline_audit_log (tenant_id, facility_id, timestamp DESC)")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_physician_feedback_tenant_facility ON physician_feedback (tenant_id, facility_id, created_at DESC)")
+        await conn.execute(
+            "ALTER TABLE physician_feedback ADD COLUMN IF NOT EXISTS facility_id TEXT"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_patient_runs_tenant_facility ON patient_runs (tenant_id, facility_id, created_at DESC)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pipeline_audit_log_tenant_facility ON pipeline_audit_log (tenant_id, facility_id, timestamp DESC)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_physician_feedback_tenant_facility ON physician_feedback (tenant_id, facility_id, created_at DESC)"
+        )
         await conn.execute(
             """
             CREATE UNIQUE INDEX IF NOT EXISTS idx_patient_runs_tenant_facility_profile
@@ -30,11 +40,15 @@ async def setup_memory_schema(conn: asyncpg.Connection, *, ddl: str, schema_vers
 
         if current_version < 6:
             await conn.execute("ALTER TABLE llm_cache ADD COLUMN IF NOT EXISTS prefix TEXT")
-            needs_backfill = await conn.fetchval("SELECT EXISTS (SELECT 1 FROM llm_cache WHERE prefix IS NULL LIMIT 1)")
+            needs_backfill = await conn.fetchval(
+                "SELECT EXISTS (SELECT 1 FROM llm_cache WHERE prefix IS NULL LIMIT 1)"
+            )
             if bool(needs_backfill):
                 await conn.execute("UPDATE llm_cache SET prefix = '' WHERE prefix IS NULL")
             await conn.execute("ALTER TABLE llm_cache ALTER COLUMN prefix SET NOT NULL")
-            await conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_cache_prefix ON llm_cache (prefix)")
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_llm_cache_prefix ON llm_cache (prefix)"
+            )
 
         if current_version < 7:
             await conn.execute(

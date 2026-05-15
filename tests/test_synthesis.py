@@ -88,7 +88,9 @@ async def test_generate_report_plan_uses_reportplan_model(monkeypatch: pytest.Mo
             return DummyChain()
 
     monkeypatch.setattr(report_synthesizer, "get_llm", lambda: LLMStub())
-    monkeypatch.setattr(report_synthesizer.ChatPromptTemplate, "from_template", lambda _template: DummyPrompt())
+    monkeypatch.setattr(
+        report_synthesizer.ChatPromptTemplate, "from_template", lambda _template: DummyPrompt()
+    )
 
     out = await report_synthesizer.generate_report_plan(
         patient_profile={"age": 60, "sex": "male", "primary_condition": "NSCLC"},
@@ -111,7 +113,10 @@ def test_exception_label() -> None:
 @pytest.mark.asyncio
 async def test_run_qa_check_success_and_exception(monkeypatch: pytest.MonkeyPatch) -> None:
     async def ok_run(**_kwargs):
-        return {"qa_passed": False, "qa_issues": [{"code": "X", "severity": "high", "message": "x"}]}
+        return {
+            "qa_passed": False,
+            "qa_issues": [{"code": "X", "severity": "high", "message": "x"}],
+        }
 
     monkeypatch.setattr(nodes.qa_checker, "run_qa_check", ok_run)
     out = await nodes.run_qa_check({})
@@ -132,7 +137,12 @@ def test_route_after_qa_branches() -> None:
     assert nodes.route_after_qa({"qa_passed": True}) == "generate_report"
     assert nodes.route_after_qa({"qa_passed": False, "qa_fix_attempts": 0}) == "attempt_qa_fix"
     assert nodes.route_after_qa({"qa_passed": False, "qa_fix_attempts": 2}) == "flag_re_evaluation"
-    assert nodes.route_after_qa({"qa_passed": False, "qa_fix_attempts": 1, "synthesis_needs_re_evaluation": True}) == "flag_re_evaluation"
+    assert (
+        nodes.route_after_qa(
+            {"qa_passed": False, "qa_fix_attempts": 1, "synthesis_needs_re_evaluation": True}
+        )
+        == "flag_re_evaluation"
+    )
 
 
 @pytest.mark.asyncio
@@ -151,7 +161,9 @@ async def test_attempt_fix_and_flag_and_finalize() -> None:
     assert fixed["trial_scores"][0]["trial_id"] == "B"
     assert fixed["qa_remediation_actions"][0]["action"] == "rerank_trials"
 
-    flagged = await nodes.flag_re_evaluation({"qa_issues": [{"code": "X", "severity": "high", "message": "x"}]})
+    flagged = await nodes.flag_re_evaluation(
+        {"qa_issues": [{"code": "X", "severity": "high", "message": "x"}]}
+    )
     assert flagged["synthesis_needs_re_evaluation"] is True
 
     finalized = await nodes.finalize_synthesis_output(
@@ -165,7 +177,9 @@ async def test_attempt_fix_and_flag_and_finalize() -> None:
             "new_decision_entries": ["d"],
             "new_errors": ["e"],
             "qa_fix_attempts": 1,
-            "qa_remediation_actions": [{"attempt": "1", "action": "rerank_trials", "issue_code": "Q"}],
+            "qa_remediation_actions": [
+                {"attempt": "1", "action": "rerank_trials", "issue_code": "Q"}
+            ],
             "qa_unresolved_issues": [],
         }
     )

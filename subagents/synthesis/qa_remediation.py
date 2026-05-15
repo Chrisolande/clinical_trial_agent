@@ -63,7 +63,11 @@ def normalize_qa_issues(issues: Any) -> list[QAIssue]:
 def build_remediation_summary(state: SynthesisState) -> dict[str, Any]:
     actions = list(state.get("qa_remediation_actions") or [])
     unresolved = normalize_qa_issues(state.get("qa_unresolved_issues") or [])
-    return {"attempts": int(state.get("qa_fix_attempts", 0)), "actions": actions, "unresolved_issues": unresolved}
+    return {
+        "attempts": int(state.get("qa_fix_attempts", 0)),
+        "actions": actions,
+        "unresolved_issues": unresolved,
+    }
 
 
 def issue_requires_retrieval_retry(issue: QAIssue) -> bool:
@@ -116,7 +120,11 @@ def _recompute_tiers_from_verdicts(
         if hard_failures >= 1:
             updated["tier"] = "disqualified"
             updated["score"] = min(float(updated.get("score", 0.0)), 0.2)
-        elif total > 0 and uncertain == total and TIER_ORDER.get(str(updated.get("tier", "weak")), 0) >= TIER_ORDER["moderate"]:
+        elif (
+            total > 0
+            and uncertain == total
+            and TIER_ORDER.get(str(updated.get("tier", "weak")), 0) >= TIER_ORDER["moderate"]
+        ):
             updated["tier"] = "weak"
             updated["score"] = min(float(updated.get("score", 0.0)), 0.39)
         recomputed.append(updated)
@@ -125,7 +133,17 @@ def _recompute_tiers_from_verdicts(
 
 def _normalize_gap_key(item: Any) -> str:
     if isinstance(item, dict):
-        return str(item.get("field_id") or item.get("field") or item.get("display_name") or item.get("description") or "").strip().lower()
+        return (
+            str(
+                item.get("field_id")
+                or item.get("field")
+                or item.get("display_name")
+                or item.get("description")
+                or ""
+            )
+            .strip()
+            .lower()
+        )
     return str(item).strip().lower()
 
 
@@ -172,24 +190,80 @@ async def attempt_qa_fix(state: SynthesisState) -> dict[str, Any]:
     primary_issue = _select_primary_issue(issues)
     action = _action_for_issue(primary_issue)
     issue_code = str(primary_issue.get("code", "UNSPECIFIED")) if primary_issue else "UNSPECIFIED"
-    remediation_record = {"attempt": str(fix_attempts + 1), "action": action, "issue_code": issue_code}
+    remediation_record = {
+        "attempt": str(fix_attempts + 1),
+        "action": action,
+        "issue_code": issue_code,
+    }
 
     if action == "recompute_tier_from_verdicts":
         patched = _recompute_tiers_from_verdicts(scored, verdicts)
-        return {"trial_scores": patched, "qa_fix_attempts": fix_attempts + 1, "synthesis_needs_re_evaluation": False, "synthesis_retry_retrieval": False, "qa_remediation_actions": [remediation_record], "new_decision_entries": [f"QA remediation attempt {fix_attempts + 1}: recomputed tiers from verdicts for {issue_code}."]}
+        return {
+            "trial_scores": patched,
+            "qa_fix_attempts": fix_attempts + 1,
+            "synthesis_needs_re_evaluation": False,
+            "synthesis_retry_retrieval": False,
+            "qa_remediation_actions": [remediation_record],
+            "new_decision_entries": [
+                f"QA remediation attempt {fix_attempts + 1}: recomputed tiers from verdicts for {issue_code}."
+            ],
+        }
     if action == "sanitize_information_gaps":
         patched = _sanitize_information_gaps(scored)
-        return {"trial_scores": patched, "qa_fix_attempts": fix_attempts + 1, "synthesis_needs_re_evaluation": False, "synthesis_retry_retrieval": False, "qa_remediation_actions": [remediation_record], "new_decision_entries": [f"QA remediation attempt {fix_attempts + 1}: sanitized information gaps for {issue_code}."]}
+        return {
+            "trial_scores": patched,
+            "qa_fix_attempts": fix_attempts + 1,
+            "synthesis_needs_re_evaluation": False,
+            "synthesis_retry_retrieval": False,
+            "qa_remediation_actions": [remediation_record],
+            "new_decision_entries": [
+                f"QA remediation attempt {fix_attempts + 1}: sanitized information gaps for {issue_code}."
+            ],
+        }
     if action == "regenerate_report_plan":
-        return {"qa_fix_attempts": fix_attempts + 1, "synthesis_needs_re_evaluation": False, "synthesis_retry_retrieval": False, "qa_remediation_actions": [remediation_record], "new_decision_entries": [f"QA remediation attempt {fix_attempts + 1}: regenerated report plan for {issue_code}."]}
+        return {
+            "qa_fix_attempts": fix_attempts + 1,
+            "synthesis_needs_re_evaluation": False,
+            "synthesis_retry_retrieval": False,
+            "qa_remediation_actions": [remediation_record],
+            "new_decision_entries": [
+                f"QA remediation attempt {fix_attempts + 1}: regenerated report plan for {issue_code}."
+            ],
+        }
     if action == "rerank_trials":
         patched = _sort_trials(scored)
-        return {"trial_scores": patched, "qa_fix_attempts": fix_attempts + 1, "synthesis_needs_re_evaluation": False, "synthesis_retry_retrieval": False, "qa_remediation_actions": [remediation_record], "new_decision_entries": [f"QA remediation attempt {fix_attempts + 1}: reranked trial scores for {issue_code}."]}
+        return {
+            "trial_scores": patched,
+            "qa_fix_attempts": fix_attempts + 1,
+            "synthesis_needs_re_evaluation": False,
+            "synthesis_retry_retrieval": False,
+            "qa_remediation_actions": [remediation_record],
+            "new_decision_entries": [
+                f"QA remediation attempt {fix_attempts + 1}: reranked trial scores for {issue_code}."
+            ],
+        }
     if action in {"broaden_retrieval", "reparse_age_criteria"}:
         retrieval_retry = any(issue_requires_retrieval_retry(issue) for issue in issues)
-        return {"qa_fix_attempts": fix_attempts + 1, "synthesis_needs_re_evaluation": True, "synthesis_retry_retrieval": retrieval_retry, "qa_remediation_actions": [remediation_record], "new_decision_entries": [f"QA remediation attempt {fix_attempts + 1}: escalated {issue_code} for upstream retry."]}
+        return {
+            "qa_fix_attempts": fix_attempts + 1,
+            "synthesis_needs_re_evaluation": True,
+            "synthesis_retry_retrieval": retrieval_retry,
+            "qa_remediation_actions": [remediation_record],
+            "new_decision_entries": [
+                f"QA remediation attempt {fix_attempts + 1}: escalated {issue_code} for upstream retry."
+            ],
+        }
     unresolved = [primary_issue] if primary_issue is not None else []
-    return {"qa_fix_attempts": fix_attempts + 1, "synthesis_needs_re_evaluation": False, "synthesis_retry_retrieval": False, "qa_unresolved_issues": unresolved, "qa_remediation_actions": [remediation_record], "new_decision_entries": [f"QA remediation attempt {fix_attempts + 1}: marked {issue_code} unresolved for escalation."]}
+    return {
+        "qa_fix_attempts": fix_attempts + 1,
+        "synthesis_needs_re_evaluation": False,
+        "synthesis_retry_retrieval": False,
+        "qa_unresolved_issues": unresolved,
+        "qa_remediation_actions": [remediation_record],
+        "new_decision_entries": [
+            f"QA remediation attempt {fix_attempts + 1}: marked {issue_code} unresolved for escalation."
+        ],
+    }
 
 
 async def flag_re_evaluation(state: SynthesisState) -> dict[str, Any]:
@@ -201,7 +275,9 @@ async def flag_re_evaluation(state: SynthesisState) -> dict[str, Any]:
         "synthesis_needs_re_evaluation": True,
         "synthesis_retry_retrieval": retry_retrieval,
         "qa_unresolved_issues": all_issues,
-        "new_decision_entries": [f"Synthesis flagging retry due to persistent QA issues: {[issue.get('code', 'UNSPECIFIED') for issue in all_issues[:3]]}"],
+        "new_decision_entries": [
+            f"Synthesis flagging retry due to persistent QA issues: {[issue.get('code', 'UNSPECIFIED') for issue in all_issues[:3]]}"
+        ],
     }
 
 
@@ -213,7 +289,8 @@ def collect_synthesis_inputs(state: SynthesisState) -> dict[str, Any]:
         "eligibility_verdicts": state.get("eligibility_verdicts") or {},
         "trials_raw": state.get("trials_raw") or [],
         "search_queries": state.get("search_queries") or [],
-        "decision_history": list(state.get("decision_history") or []) + list(state.get("new_decision_entries") or []),
+        "decision_history": list(state.get("decision_history") or [])
+        + list(state.get("new_decision_entries") or []),
         "qa_issues": normalize_qa_issues(state.get("qa_issues") or []),
         "retrieval_errors": list(state.get("retrieval_errors") or []),
         "qa_remediation": build_remediation_summary(state),

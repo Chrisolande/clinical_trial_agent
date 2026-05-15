@@ -10,7 +10,9 @@ async def test_supervisor_calls_subagents_in_sequence(monkeypatch: pytest.Monkey
     order: list[str] = []
 
     class DummyReactAgent:
-        async def ainvoke(self, agent_input: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+        async def ainvoke(
+            self, agent_input: dict[str, Any], config: dict[str, Any]
+        ) -> dict[str, Any]:
             assert "messages" in agent_input
             assert "configurable" in config
             return {"report_text": "fallback text only"}
@@ -38,7 +40,13 @@ async def test_supervisor_calls_subagents_in_sequence(monkeypatch: pytest.Monkey
     ) -> dict[str, Any]:
         _ = (patient_profile, trials_deduplicated, eligibility_verdicts, thread_id, attempt)
         order.append("eligibility")
-        return {"trial_scores": [{"trial_id": "T1", "tier": "moderate", "score": 0.6}], "eligibility_verdicts": {}, "missing_info_recommendations": [], "decision_history": [], "trials_with_criteria": []}
+        return {
+            "trial_scores": [{"trial_id": "T1", "tier": "moderate", "score": 0.6}],
+            "eligibility_verdicts": {},
+            "missing_info_recommendations": [],
+            "decision_history": [],
+            "trials_with_criteria": [],
+        }
 
     async def fake_run_synthesis(
         patient_profile: dict[str, Any],
@@ -51,7 +59,17 @@ async def test_supervisor_calls_subagents_in_sequence(monkeypatch: pytest.Monkey
         trials_with_criteria: list[dict[str, Any]] | None = None,
         thread_id: str | None = None,
     ) -> dict[str, Any]:
-        _ = (patient_profile, trial_scores, eligibility_verdicts, missing_info_recommendations, trials_raw, search_queries, decision_history, trials_with_criteria, thread_id)
+        _ = (
+            patient_profile,
+            trial_scores,
+            eligibility_verdicts,
+            missing_info_recommendations,
+            trials_raw,
+            search_queries,
+            decision_history,
+            trials_with_criteria,
+            thread_id,
+        )
         order.append("synthesis")
         return {"report_json": {"ok": True}, "report_text": "done"}
 
@@ -165,12 +183,18 @@ def test_feedback_adjustment_changes_ranking() -> None:
 
 
 @pytest.mark.asyncio
-async def test_supervisor_retry_budget_includes_initial_attempt(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_supervisor_retry_budget_includes_initial_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     orchestrator = SupervisorOrchestrator()
     calls: list[int] = []
     monkeypatch.setattr(
         "agents.supervisor.get_settings",
-        lambda: type("S", (), {"one_pass_mode": False, "max_retry_attempts": 2, "max_trials_for_eligibility": 5})(),
+        lambda: type(
+            "S",
+            (),
+            {"one_pass_mode": False, "max_retry_attempts": 2, "max_trials_for_eligibility": 5},
+        )(),
     )
 
     async def fake_retrieval(**kwargs: Any) -> dict[str, Any]:
@@ -190,7 +214,9 @@ async def test_supervisor_retry_budget_includes_initial_attempt(monkeypatch: pyt
     monkeypatch.setattr(orchestrator, "run_retrieval", fake_retrieval)
     monkeypatch.setattr(orchestrator, "run_eligibility", fake_eligibility)
     monkeypatch.setattr(orchestrator, "run_synthesis", fake_synthesis)
-    result = await orchestrator._run_tools_pipeline({"age": 40}, thread_id="retry-thread", memory=DummyMemory())
+    result = await orchestrator._run_tools_pipeline(
+        {"age": 40}, thread_id="retry-thread", memory=DummyMemory()
+    )
     assert result["report_text"] == "done"
     assert calls == [0, 1, 2]
 
@@ -206,11 +232,24 @@ async def test_supervisor_feedback_lookup_uses_patient_profile_for_scoped_hash(
 
     monkeypatch.setattr(
         "agents.supervisor.get_settings",
-        lambda: type("S", (), {"one_pass_mode": True, "max_retry_attempts": 0, "max_trials_for_eligibility": 5, "criteria_text_max_chars": 8000})(),
+        lambda: type(
+            "S",
+            (),
+            {
+                "one_pass_mode": True,
+                "max_retry_attempts": 0,
+                "max_trials_for_eligibility": 5,
+                "criteria_text_max_chars": 8000,
+            },
+        )(),
     )
 
     async def fake_retrieval(**_: Any) -> dict[str, Any]:
-        return {"trials_raw": [], "trials_deduplicated": [{"nct_id": "NCT1"}, {"nct_id": "NCT2"}], "search_queries": []}
+        return {
+            "trials_raw": [],
+            "trials_deduplicated": [{"nct_id": "NCT1"}, {"nct_id": "NCT2"}],
+            "search_queries": [],
+        }
 
     async def fake_eligibility(**_: Any) -> dict[str, Any]:
         return {
@@ -237,7 +276,9 @@ async def test_supervisor_feedback_lookup_uses_patient_profile_for_scoped_hash(
     monkeypatch.setattr(orchestrator, "run_eligibility", fake_eligibility)
     monkeypatch.setattr(orchestrator, "run_synthesis", fake_synthesis)
 
-    result = await orchestrator._run_tools_pipeline(patient_profile, thread_id="feedback-thread", memory=DummyMemory())
+    result = await orchestrator._run_tools_pipeline(
+        patient_profile, thread_id="feedback-thread", memory=DummyMemory()
+    )
     assert result["report_text"] == "done"
     assert seen_lookup_payloads == [patient_profile]
     assert synthesis_scores[0][0]["trial_id"] == "NCT2"

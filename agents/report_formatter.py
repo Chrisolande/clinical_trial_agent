@@ -21,21 +21,33 @@ from .report_formatter_sanitize import (
 def build_text_report(report_json: dict[str, Any]) -> str:
     plan = _extract_report_plan(report_json)
     cards = _cards_from_plan_or_matches(report_json, plan)
-    plan_gaps = plan.get("information_gaps", []) if isinstance(plan.get("information_gaps"), list) else []
-    fallback_gaps = report_json.get("information_gaps", []) if isinstance(report_json.get("information_gaps"), list) else []
+    plan_gaps = (
+        plan.get("information_gaps", []) if isinstance(plan.get("information_gaps"), list) else []
+    )
+    fallback_gaps = (
+        report_json.get("information_gaps", [])
+        if isinstance(report_json.get("information_gaps"), list)
+        else []
+    )
     info_gaps = plan_gaps or fallback_gaps
 
     patient_summary = _sanitize_public_text(
         str(plan.get("patient_summary") or report_json.get("patient_summary", "")).strip()
     )
     bottom_line = _compact_executive_summary(
-        str(plan.get("bottom_line") or plan.get("executive_summary") or report_json.get("executive_summary", "")).strip()
+        str(
+            plan.get("bottom_line")
+            or plan.get("executive_summary")
+            or report_json.get("executive_summary", "")
+        ).strip()
     )
     executive_summary = _compact_executive_summary(
         str(plan.get("executive_summary") or report_json.get("executive_summary", "")).strip()
     )
     recommended_actions = (
-        plan.get("recommended_actions", []) if isinstance(plan.get("recommended_actions"), list) else []
+        plan.get("recommended_actions", [])
+        if isinstance(plan.get("recommended_actions"), list)
+        else []
     )
 
     lines = [

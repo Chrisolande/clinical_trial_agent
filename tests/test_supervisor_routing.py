@@ -11,8 +11,16 @@ def test_route_after_eligibility_respects_retry_budget(monkeypatch: pytest.Monke
         "clinical_trial_agent.langgraph_app.get_settings",
         lambda: type("S", (), {"one_pass_mode": False, "max_retry_attempts": 2})(),
     )
-    assert route_after_eligibility({"eligibility_result": {"retrieval_needs_broadening": True}}) == "retry_retrieval"
-    assert route_after_eligibility({"retry_count": 2, "eligibility_result": {"retrieval_needs_broadening": True}}) == "run_synthesis"
+    assert (
+        route_after_eligibility({"eligibility_result": {"retrieval_needs_broadening": True}})
+        == "retry_retrieval"
+    )
+    assert (
+        route_after_eligibility(
+            {"retry_count": 2, "eligibility_result": {"retrieval_needs_broadening": True}}
+        )
+        == "run_synthesis"
+    )
 
 
 @pytest.mark.asyncio
@@ -25,7 +33,16 @@ async def test_supervisor_retries_after_synthesis_re_evaluation(
 
     monkeypatch.setattr(
         "agents.supervisor.get_settings",
-        lambda: type("S", (), {"one_pass_mode": False, "max_retry_attempts": 1, "max_trials_for_eligibility": 5, "criteria_text_max_chars": 8000})(),
+        lambda: type(
+            "S",
+            (),
+            {
+                "one_pass_mode": False,
+                "max_retry_attempts": 1,
+                "max_trials_for_eligibility": 5,
+                "criteria_text_max_chars": 8000,
+            },
+        )(),
     )
 
     async def fake_retrieval(**_kwargs: Any) -> dict[str, Any]:
@@ -67,7 +84,9 @@ async def test_supervisor_retries_after_synthesis_re_evaluation(
     monkeypatch.setattr(orchestrator, "run_eligibility", fake_eligibility)
     monkeypatch.setattr(orchestrator, "run_synthesis", fake_synthesis)
 
-    result = await orchestrator._run_tools_pipeline({"age": 40}, thread_id="qa-thread", memory=DummyMemory())
+    result = await orchestrator._run_tools_pipeline(
+        {"age": 40}, thread_id="qa-thread", memory=DummyMemory()
+    )
     assert result["report_text"] == "done"
     assert synthesis_calls == [0, 1]
     assert eligibility_calls == [0, 1]
@@ -80,6 +99,33 @@ def test_route_after_synthesis_respects_re_evaluation(monkeypatch: pytest.Monkey
         "clinical_trial_agent.langgraph_app.get_settings",
         lambda: type("S", (), {"one_pass_mode": False, "max_retry_attempts": 1})(),
     )
-    assert route_after_synthesis({"retry_count": 0, "synthesis_needs_re_evaluation": True, "synthesis_retry_retrieval": True}) == "retry_retrieval"
-    assert route_after_synthesis({"retry_count": 0, "synthesis_needs_re_evaluation": True, "synthesis_retry_retrieval": False}) == "retry_eligibility"
-    assert route_after_synthesis({"retry_count": 1, "synthesis_needs_re_evaluation": True, "synthesis_retry_retrieval": False}) == "end"
+    assert (
+        route_after_synthesis(
+            {
+                "retry_count": 0,
+                "synthesis_needs_re_evaluation": True,
+                "synthesis_retry_retrieval": True,
+            }
+        )
+        == "retry_retrieval"
+    )
+    assert (
+        route_after_synthesis(
+            {
+                "retry_count": 0,
+                "synthesis_needs_re_evaluation": True,
+                "synthesis_retry_retrieval": False,
+            }
+        )
+        == "retry_eligibility"
+    )
+    assert (
+        route_after_synthesis(
+            {
+                "retry_count": 1,
+                "synthesis_needs_re_evaluation": True,
+                "synthesis_retry_retrieval": False,
+            }
+        )
+        == "end"
+    )

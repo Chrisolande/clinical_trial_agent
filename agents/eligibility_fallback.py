@@ -8,19 +8,31 @@ from pydantic import ValidationError
 from clinical_trial_agent.constants import ELIGIBILITY_TIMEOUT_FALLBACK_MESSAGE
 
 from .eligibility_fallback_rules import (
-    append_outcome,
-    assess_exclusion,
-    assess_inclusion,
-    append_outcome as _append_outcome_impl,
-    assess_exclusion as _assess_exclusion_impl,
     _assess_inclusion_age as _assess_inclusion_age_impl,
+)
+from .eligibility_fallback_rules import (
     _assess_inclusion_biomarker as _assess_inclusion_biomarker_impl,
+)
+from .eligibility_fallback_rules import (
     _assess_inclusion_melanoma as _assess_inclusion_melanoma_impl,
+)
+from .eligibility_fallback_rules import (
     _assess_inclusion_performance as _assess_inclusion_performance_impl,
+)
+from .eligibility_fallback_rules import (
     _extract_age_bound as _extract_age_bound_impl,
+)
+from .eligibility_fallback_rules import (
+    append_outcome,
     evaluate_single_criterion,
     profile_blob,
     select_timeout_tier_and_score,
+)
+from .eligibility_fallback_rules import (
+    append_outcome as _append_outcome_impl,
+)
+from .eligibility_fallback_rules import (
+    assess_exclusion as _assess_exclusion_impl,
 )
 
 FALLBACK_VERDICT: dict[str, Any] = {
@@ -32,7 +44,9 @@ FALLBACK_VERDICT: dict[str, Any] = {
     "inclusion_uncertain": [],
     "exclusion_triggered": [],
     "exclusion_uncertain": [],
-    "critical_missing_info": ["Eligibility could not be confidently assessed from available criteria."],
+    "critical_missing_info": [
+        "Eligibility could not be confidently assessed from available criteria."
+    ],
     "key_concern": "Eligibility assessment inconclusive",
     "rationale": "Eligibility assessment was inconclusive; conservative weak tier assigned.",
     "internal_fallback_used": True,
@@ -168,15 +182,21 @@ def _assess_inclusion_melanoma(lowered: str, profile_blob_text: str) -> tuple[st
     return _assess_inclusion_melanoma_impl(lowered, profile_blob_text)
 
 
-def _assess_inclusion_biomarker(lowered: str, patient_profile: dict[str, Any]) -> tuple[str, str] | None:
+def _assess_inclusion_biomarker(
+    lowered: str, patient_profile: dict[str, Any]
+) -> tuple[str, str] | None:
     return _assess_inclusion_biomarker_impl(lowered, patient_profile)
 
 
-def _assess_inclusion_performance(lowered: str, patient_profile: dict[str, Any]) -> tuple[str, str] | None:
+def _assess_inclusion_performance(
+    lowered: str, patient_profile: dict[str, Any]
+) -> tuple[str, str] | None:
     return _assess_inclusion_performance_impl(lowered, patient_profile)
 
 
-def _assess_exclusion(text: str, patient_profile: dict[str, Any], profile_blob_text: str) -> tuple[str, str]:
+def _assess_exclusion(
+    text: str, patient_profile: dict[str, Any], profile_blob_text: str
+) -> tuple[str, str]:
     return _assess_exclusion_impl(text, patient_profile, profile_blob_text)
 
 

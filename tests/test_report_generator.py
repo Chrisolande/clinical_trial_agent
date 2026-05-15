@@ -82,12 +82,18 @@ def _base_report_json(debug: bool = False) -> dict:
         "strong_matches": [],
         "moderate_matches": [],
         "excluded_trial_count": 1,
-        "excluded_trials": [{"trial_id": "NCTX", "brief_title": "Excluded", "tier": "weak", "score": 0.2}],
+        "excluded_trials": [
+            {"trial_id": "NCTX", "brief_title": "Excluded", "tier": "weak", "score": 0.2}
+        ],
         "information_gaps": [],
         "ranked_trials": [],
         "methodology_note": "This uses llm summarization; parser fallback if tool failed.",
         "qa_issues_internal": [{"code": "X", "severity": "high", "message": "internal qa issue"}],
-        "qa_remediation_internal": {"attempts": 1, "actions": [{"action": "rerank_trials"}], "unresolved_issues": []},
+        "qa_remediation_internal": {
+            "attempts": 1,
+            "actions": [{"action": "rerank_trials"}],
+            "unresolved_issues": [],
+        },
         "debug": debug,
     }
 
@@ -171,17 +177,43 @@ async def test_build_report_payload_and_plan_rendering(monkeypatch: pytest.Monke
     report = await report_generator.build_report(
         patient_profile={"age": 64, "sex": "female", "primary_condition": "NSCLC"},
         scored_trials=[
-            {"trial_id": "NCTB", "brief_title": "Trial B", "tier": "moderate", "score": 0.64, "critical_missing_info": []},
-            {"trial_id": "NCTA", "brief_title": "Trial A", "tier": "strong", "score": 0.86, "critical_missing_info": []},
-            {"trial_id": "NCTX", "brief_title": "Trial X", "tier": "weak", "score": 0.2, "critical_missing_info": []},
+            {
+                "trial_id": "NCTB",
+                "brief_title": "Trial B",
+                "tier": "moderate",
+                "score": 0.64,
+                "critical_missing_info": [],
+            },
+            {
+                "trial_id": "NCTA",
+                "brief_title": "Trial A",
+                "tier": "strong",
+                "score": 0.86,
+                "critical_missing_info": [],
+            },
+            {
+                "trial_id": "NCTX",
+                "brief_title": "Trial X",
+                "tier": "weak",
+                "score": 0.2,
+                "critical_missing_info": [],
+            },
         ],
         missing_info=[],
-        eligibility_verdicts={"NCTA": {"verdicts": []}, "NCTB": {"verdicts": []}, "NCTX": {"verdicts": []}},
+        eligibility_verdicts={
+            "NCTA": {"verdicts": []},
+            "NCTB": {"verdicts": []},
+            "NCTX": {"verdicts": []},
+        },
         trials_raw=[{}, {}, {}],
         search_queries=["nsclc trial"],
         decision_history=["initial synthesis"],
         qa_issues=[{"code": "N_A_LEAKAGE_IN_GAPS", "severity": "medium", "message": "sanitize"}],
-        qa_remediation={"attempts": 1, "actions": [{"action": "sanitize_information_gaps"}], "unresolved_issues": []},
+        qa_remediation={
+            "attempts": 1,
+            "actions": [{"action": "sanitize_information_gaps"}],
+            "unresolved_issues": [],
+        },
     )
 
     assert "report_plan" in report
