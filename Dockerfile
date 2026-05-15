@@ -25,12 +25,12 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY --from=ghcr.io/astral-sh/uv:0.8.5@sha256:9ac8566d708f42bae522b050004f75ebc7c344bc726d6d4e70f1d308b18c4471 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.11.14 /uv /uvx /bin/
 
 COPY pyproject.toml uv.lock /app/
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-  uv export --frozen --no-dev --format requirements-txt --output-file /app/requirements.txt \
+  uv export --frozen --no-dev --no-emit-project --format requirements-txt --output-file /app/requirements.txt \
   && uv pip install --system -r /app/requirements.txt \
   && rm -f /app/requirements.txt
 
