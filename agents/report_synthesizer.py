@@ -229,20 +229,3 @@ async def generate_report_plan(
         critical_missing_count,
     )
     return report_plan
-
-
-async def generate_executive_summary(
-    patient_profile: dict[str, Any],
-    scored_trials: list[dict[str, Any]],
-) -> dict[str, str]:
-    report_plan = await generate_report_plan(
-        patient_profile=patient_profile,
-        scored_trials=scored_trials,
-        eligibility_verdicts={},
-        missing_info=[],
-        qa_issues=[],
-    )
-    return {
-        "executive_summary": report_plan.executive_summary,
-        "patient_summary": report_plan.patient_summary,
-    }

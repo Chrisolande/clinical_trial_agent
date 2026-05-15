@@ -1,7 +1,7 @@
 import asyncio
 import json
 import re
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from langchain_core.messages import BaseMessage
 from langchain_core.prompts import ChatPromptTemplate
@@ -80,21 +80,21 @@ def _extract_text_from_message(result: Any) -> str:
         return result
 
     if isinstance(result, BaseMessage):
-        content = result.content
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
+        msg_content = result.content
+        if isinstance(msg_content, str):
+            return msg_content
+        if isinstance(msg_content, list):
             parts: list[str] = []
-            for item in content:
+            for item in msg_content:
                 if isinstance(item, str):
                     parts.append(item)
                 elif isinstance(item, dict) and isinstance(item.get("text"), str):
-                    parts.append(item["text"])
+                    parts.append(cast("str", item["text"]))
             return "\n".join(parts)
 
-    content = getattr(result, "content", None)
-    if isinstance(content, str):
-        return content
+    res_content = getattr(result, "content", None)
+    if isinstance(res_content, str):
+        return res_content
 
     return str(result)
 

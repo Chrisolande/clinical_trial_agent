@@ -1,5 +1,6 @@
 from agents.eligibility_fallback import deterministic_timeout_verdict
-from agents.report_generator import _deduplicate_gaps, _merge_information_gaps
+from agents.report_generator_gaps import _deduplicate_gaps
+from agents.report_generator_gaps import merge_information_gaps as _merge_information_gaps
 from agents.report_synthesizer import _build_exec_summary_context
 from models.judge_verdict import JudgeVerdict
 from models.missing_info import CompletenessAssessment

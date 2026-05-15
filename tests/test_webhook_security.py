@@ -7,7 +7,7 @@ from tools.cli_support import validate_webhook_url
     "url",
     [
         "http://example.com/hook",
-        "https://user:pass@example.com/hook",
+        "https://user:pass@example.com/hook",  # pragma: allowlist secret
         "ftp://example.com/hook",
         "https://localhost/hook",
         "https://127.0.0.1/hook",
