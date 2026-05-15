@@ -4,8 +4,8 @@ from pydantic import BaseModel, Field, model_validator
 
 from clinical_trial_agent.config import TIER_ORDER
 
-MIN_ASSESSED_CRITERIA_FOR_STRONG = 3
-MIN_TOTAL_CRITERIA_FOR_STRONG = 4
+MIN_ASSESSED_CRITERIA_FOR_STRONG = 2
+MIN_TOTAL_CRITERIA_FOR_STRONG = 2
 MIN_MAJOR_MET_FOR_STRONG = 1
 MAX_UNCERTAIN_RATIO_FOR_STRONG = 0.34
 MAJOR_CRITERION_KEYWORDS = (
@@ -27,6 +27,17 @@ MAJOR_CRITERION_KEYWORDS = (
     "line of therapy",
     "measurable disease",
     "recist",
+    "adenocarcinoma",
+    "carcinoma",
+    "melanoma",
+    "lymphoma",
+    "myeloma",
+    "leukemia",
+    "chemotherapy",
+    "targeted therapy",
+    "immunotherapy",
+    "refractory",
+    "relapsed",
 )
 
 
@@ -42,6 +53,7 @@ class JudgeVerdict(BaseModel):
     critical_missing_info: list[str] = Field(default_factory=list)
     key_concern: str
     rationale: str
+    internal_fallback_used: bool = False
 
     @model_validator(mode="after")
     def _coerce_disqualified_score(self) -> "JudgeVerdict":

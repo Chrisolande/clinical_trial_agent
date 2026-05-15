@@ -5,33 +5,6 @@ from agents import criteria_parser
 from models.criteria import ParsedEligibilityCriterion
 
 
-def test_clean_lines_and_split_sections() -> None:
-    text = """
-    Inclusion Criteria:
-    - Age >= 18 years
-    1) Histology confirmed
-    Exclusion Criteria:
-    * Prior EGFR therapy
-    """
-    inclusion, exclusion = criteria_parser._split_sections(text)
-    assert "Age >= 18 years" in inclusion
-    assert "Prior EGFR therapy" in exclusion
-
-
-def test_infer_category_fallback_and_keywords() -> None:
-    assert criteria_parser._infer_category("Age >= 18 years") == "age"
-    assert criteria_parser._infer_category("Unknown phrase") == "other"
-
-
-def test_fallback_parse_builds_inclusion_and_exclusion() -> None:
-    parsed = criteria_parser._fallback_parse_criteria(
-        "Inclusion Criteria:\nAge >= 18 years\nExclusion Criteria:\nhistory of EGFR mutation"
-    )
-    assert parsed.inclusion_criteria
-    assert parsed.exclusion_criteria
-    assert parsed.exclusion_criteria[0].is_hard_exclusion is True
-
-
 def test_assign_ids_sets_defaults() -> None:
     parsed = {
         "inclusion_criteria": [{"text": "A"}],
@@ -69,6 +42,21 @@ async def test_parse_eligibility_criteria_uses_cache_hit(monkeypatch: pytest.Mon
     assert result["inclusion_criteria"][0]["text"] == "cached"
 
 
+def test_strip_json_fences_removes_code_block() -> None:
+    text = """```json
+    {"inclusion_criteria": [], "exclusion_criteria": []}
+    ```"""
+    cleaned = criteria_parser._strip_json_fences(text)
+    assert cleaned.startswith("{")
+    assert cleaned.endswith("}")
+
+
+def test_extract_json_object_parses_wrapped() -> None:
+    text = "LLM output: {\"inclusion_criteria\": [], \"exclusion_criteria\": []}"
+    parsed = criteria_parser._extract_json_object(text)
+    assert parsed == {"inclusion_criteria": [], "exclusion_criteria": []}
+
+
 @pytest.mark.asyncio
 async def test_parse_eligibility_criteria_empty_llm_result_falls_back(
     monkeypatch: pytest.MonkeyPatch,
@@ -78,18 +66,29 @@ async def test_parse_eligibility_criteria_empty_llm_result_falls_back(
         "get_settings",
         lambda: SimpleNamespace(use_cache=False, criteria_text_max_chars=8000),
     )
-    monkeypatch.setattr(criteria_parser, "_get_chain", lambda: object())
+    monkeypatch.setattr(criteria_parser, "_get_structured_chain", lambda: object())
+    monkeypatch.setattr(criteria_parser, "_get_json_chain", lambda: object())
 
-    async def fake_invoke(_chain, _inputs):
+    async def fake_structured(_chain, _inputs):
         return ParsedEligibilityCriterion(inclusion_criteria=[], exclusion_criteria=[])
 
-    monkeypatch.setattr(criteria_parser, "_invoke_criteria_llm", fake_invoke)
+    async def fake_json(_chain, _inputs):
+        return ParsedEligibilityCriterion(
+            inclusion_criteria=[
+                {"text": "Age >= 18 years", "is_hard_exclusion": False, "category": "age"}
+            ],
+            exclusion_criteria=[],
+        )
+
+    monkeypatch.setattr(criteria_parser, "_invoke_structured_criteria_llm", fake_structured)
+    monkeypatch.setattr(criteria_parser, "_invoke_json_criteria_llm", fake_json)
+
     result = await criteria_parser.parse_eligibility_criteria(
         "Inclusion Criteria:\nAge >= 18 years\nExclusion Criteria:\nprior therapy",
         "N2",
     )
     assert result["inclusion_criteria"]
-    assert result["exclusion_criteria"]
+    assert result["inclusion_criteria"][0]["criterion_id"] == "N2_inc_0"
 
 
 @pytest.mark.asyncio
@@ -101,12 +100,23 @@ async def test_parse_eligibility_criteria_exception_falls_back(
         "get_settings",
         lambda: SimpleNamespace(use_cache=False, criteria_text_max_chars=8000),
     )
-    monkeypatch.setattr(criteria_parser, "_get_chain", lambda: object())
+    monkeypatch.setattr(criteria_parser, "_get_structured_chain", lambda: object())
+    monkeypatch.setattr(criteria_parser, "_get_json_chain", lambda: object())
 
-    async def raise_invoke(_chain, _inputs):
+    async def raise_structured(_chain, _inputs):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(criteria_parser, "_invoke_criteria_llm", raise_invoke)
+    async def fake_json(_chain, _inputs):
+        return ParsedEligibilityCriterion(
+            inclusion_criteria=[
+                {"text": "Age >= 18 years", "is_hard_exclusion": False, "category": "age"}
+            ],
+            exclusion_criteria=[],
+        )
+
+    monkeypatch.setattr(criteria_parser, "_invoke_structured_criteria_llm", raise_structured)
+    monkeypatch.setattr(criteria_parser, "_invoke_json_criteria_llm", fake_json)
+
     result = await criteria_parser.parse_eligibility_criteria(
         "Inclusion Criteria:\nAge >= 18 years\nExclusion Criteria:\nprior therapy",
         "N3",
@@ -115,7 +125,7 @@ async def test_parse_eligibility_criteria_exception_falls_back(
 
 
 @pytest.mark.asyncio
-async def test_parse_criteria_for_trials_handles_task_exception(
+async def test_parse_criteria_for_trials_raises_on_any_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_parse(text: str, nct_id: str):
@@ -128,7 +138,5 @@ async def test_parse_criteria_for_trials_handles_task_exception(
         {"nct_id": "OK", "eligibility_criteria_raw": "Age >= 18"},
         {"nct_id": "BAD", "eligibility_criteria_raw": "Age >= 18"},
     ]
-    results = await criteria_parser.parse_criteria_for_trials(trials)
-    assert len(results) == 2
-    assert results[0]["inclusion_criteria"]
-    assert results[1]["inclusion_criteria"] == []
+    with pytest.raises(RuntimeError, match="Criteria parsing failed"):
+        await criteria_parser.parse_criteria_for_trials(trials)

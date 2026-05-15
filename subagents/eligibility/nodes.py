@@ -134,8 +134,8 @@ def _irrelevant_worker_result(
         ],
         "key_concern": "Trial condition appears unrelated to patient condition",
         "rationale": (
-            "Skipped LLM eligibility evaluation due to low condition/title token overlap "
-            "with patient primary condition."
+            "Structured eligibility assessment was deferred due to low condition/title "
+            "overlap with patient primary condition."
         ),
         **_base_verdict_counts(),
     }

@@ -14,6 +14,12 @@ Use one of:
 2. Keep changes scoped to one logical area.
 3. Reference related AGENTS.md task IDs where relevant.
 
+## Module size and refactors
+
+Keep Python modules focused and under ~300 LOC. For larger features, extract
+helpers into adjacent submodules (for example `*_helpers.py`, `*_rules.py`, or
+feature-specific helper modules) instead of growing a single file.
+
 ## Local checks
 
 Run:

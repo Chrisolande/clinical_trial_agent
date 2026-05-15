@@ -36,6 +36,9 @@ async def test_tavily_supplements_missing_eligibility_text(monkeypatch: pytest.M
     updated, count = await trial_search._supplement_trials_from_tavily(trials)
     assert count == 1
     assert updated[0]["eligibility_criteria_raw"] is not None
+    assert updated[0]["criteria_source"] == "tavily_snippet"
+    assert updated[0]["criteria_source_verified"] is False
+    assert updated[0]["criteria_completeness"] == "partial"
     assert updated[1]["eligibility_criteria_raw"] == "Already present"
 
 

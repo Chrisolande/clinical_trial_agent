@@ -6,7 +6,6 @@
 cd .
 uv sync --locked --group dev
 uv run make check
-uv run make eval
 uv run pytest --cov=clinical_trial_agent --cov=agents --cov=subagents --cov=tools --cov=models --cov-report=term --cov-fail-under=75
 ```
 

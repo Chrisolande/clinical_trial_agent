@@ -132,6 +132,9 @@ class MemoryAuditFeedbackMixin:
         verdict: str,
         note: str,
     ) -> None:
+        normalized_verdict = verdict.strip().lower()
+        if normalized_verdict not in {"confirmed", "rejected"}:
+            raise ValueError("verdict must be confirmed or rejected")
         tenant_id, facility_id, key = _scoped_profile_key_for_patient(self, patient_profile)
         now = datetime.now(UTC)
         async with self._pool_or_raise().acquire() as conn:
@@ -146,7 +149,7 @@ class MemoryAuditFeedbackMixin:
                 key,
                 run_id,
                 nct_id,
-                verdict,
+                normalized_verdict,
                 note,
                 now,
             )

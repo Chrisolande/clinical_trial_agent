@@ -8,9 +8,17 @@ from clinical_trial_agent.memory import EpisodicMemory, _serialize_encrypted_jso
 
 @pytest.fixture
 def mock_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    from clinical_trial_agent.config import get_settings
+
+    get_settings.cache_clear()
     monkeypatch.setenv("PROFILE_HASH_SALT", "test-salt")
     monkeypatch.setenv("DB_ENCRYPTION_KEY", Fernet.generate_key().decode("utf-8"))
     monkeypatch.setenv("DATABASE_URI", "postgresql://user:pass@localhost/test")
+    monkeypatch.setenv("MEMORY_DB_DSN", "postgresql://user:pass@localhost/test")
+    monkeypatch.setenv("TENANT_ID", "test-tenant")
+    monkeypatch.setenv("FACILITY_ID", "test-facility")
+    yield
+    get_settings.cache_clear()
 
 
 @pytest.fixture

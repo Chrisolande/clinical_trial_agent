@@ -185,6 +185,13 @@ def _build_scored_trial(
             if isinstance(loc, dict)
         ],
         "primary_completion_date": trial.get("primary_completion_date"),
+        "criteria_source": trial.get("criteria_source", "missing"),
+        "criteria_source_verified": bool(trial.get("criteria_source_verified", False)),
+        "criteria_retrieved_at": trial.get("criteria_retrieved_at"),
+        "criteria_completeness": trial.get("criteria_completeness", "missing"),
+        "internal_fallback_used": verdict.get("internal_fallback_used"),
+        "sparse_evidence_cap_applied": verdict.get("sparse_evidence_cap_applied"),
+        "sparse_evidence_cap_reason": verdict.get("sparse_evidence_cap_reason"),
         "verdict_details": verdict,
     }
 

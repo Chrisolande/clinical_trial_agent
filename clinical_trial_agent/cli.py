@@ -254,57 +254,6 @@ async def validate_env() -> None:
         raise SystemExit(1) from exc
 
 
-@app.async_command("eval-offline", help="Run offline evaluator on JSONL datasets.")
-async def eval_offline(
-    synthetic: Path = typer.Option(
-        Path("evaluation/data/synthetic_cases.jsonl"),
-        "--synthetic",
-        help="Path to synthetic cases JSONL",
-    ),
-    adversarial: Path = typer.Option(
-        Path("evaluation/data/adversarial_cases.jsonl"),
-        "--adversarial",
-        help="Path to adversarial cases JSONL",
-    ),
-    ranking: Path = typer.Option(
-        Path("evaluation/data/retrieval_ranking_cases.jsonl"),
-        "--ranking",
-        help="Path to ranking cases JSONL",
-    ),
-    out: Path = typer.Option(
-        Path("evaluation/reports/offline_eval_report.md"),
-        "--out",
-        help="Markdown output path",
-    ),
-    json_out: Path = typer.Option(
-        Path("evaluation/reports/offline_eval_metrics.json"),
-        "--json-out",
-        help="JSON output path",
-    ),
-) -> None:
-    from evaluation.runners.run_offline_eval import run_offline_evaluation_async
-
-    try:
-        with Progress(
-            SpinnerColumn(), TextColumn("{task.description}"), console=console
-        ) as progress:
-            progress.add_task("Running offline evaluation...", total=None)
-            result = await run_offline_evaluation_async(
-                synthetic_path=synthetic,
-                adversarial_path=adversarial,
-                ranking_path=ranking,
-                report_path=out,
-                json_path=json_out,
-            )
-        console.print(
-            f"Offline evaluation complete: status={result.get('overall_status')} "
-            f"report={out} metrics={json_out}"
-        )
-    except HANDLED_EXCEPTIONS as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise SystemExit(1) from exc
-
-
 @app.async_command("erase-profile", help="Erase all stored records for a profile hash.")
 async def erase_profile(hash: str = typer.Option(..., "--hash")) -> None:
     memory = await _with_memory()

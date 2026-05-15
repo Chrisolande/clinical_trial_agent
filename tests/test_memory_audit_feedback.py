@@ -4,14 +4,22 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from cryptography.fernet import Fernet
 
-from clinical_trial_agent.memory import EpisodicMemory
+from clinical_trial_agent.memory import EpisodicMemory, _patient_hash
 
 
 @pytest.fixture
 def mock_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    from clinical_trial_agent.config import get_settings
+
+    get_settings.cache_clear()
     monkeypatch.setenv("PROFILE_HASH_SALT", "test-salt")
     monkeypatch.setenv("DB_ENCRYPTION_KEY", Fernet.generate_key().decode("utf-8"))
     monkeypatch.setenv("DATABASE_URI", "postgresql://user:pass@localhost/test")
+    monkeypatch.setenv("MEMORY_DB_DSN", "postgresql://user:pass@localhost/test")
+    monkeypatch.setenv("TENANT_ID", "test-tenant")
+    monkeypatch.setenv("FACILITY_ID", "test-facility")
+    yield
+    get_settings.cache_clear()
 
 
 @pytest.fixture
@@ -166,3 +174,20 @@ async def test_audit_feedback_and_erase(
 def test_memory_feedback_methods_exist() -> None:
     assert hasattr(EpisodicMemory, "save_feedback")
     assert hasattr(EpisodicMemory, "list_feedback")
+
+
+def test_patient_hash_is_tenant_facility_scoped(
+    mock_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from clinical_trial_agent.config import get_settings
+
+    get_settings.cache_clear()
+    patient = {"age": 50, "primary_condition": "synthetic condition"}
+
+    tenant_a = _patient_hash(patient, tenant_id="tenant-a", facility_id="facility-a")
+    tenant_b = _patient_hash(patient, tenant_id="tenant-b", facility_id="facility-a")
+    facility_b = _patient_hash(patient, tenant_id="tenant-a", facility_id="facility-b")
+
+    assert tenant_a != tenant_b
+    assert tenant_a != facility_b
+    get_settings.cache_clear()

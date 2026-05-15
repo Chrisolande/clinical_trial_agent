@@ -12,6 +12,17 @@ from clinical_trial_agent.memory import (
 )
 
 
+@pytest.fixture(autouse=True)
+def scoped_memory_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    from clinical_trial_agent.config import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("TENANT_ID", "test-tenant")
+    monkeypatch.setenv("FACILITY_ID", "test-facility")
+    yield
+    get_settings.cache_clear()
+
+
 def test_get_profile_hash_salt_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("PROFILE_HASH_SALT", raising=False)
     with pytest.raises(RuntimeError, match="PROFILE_HASH_SALT must be set"):

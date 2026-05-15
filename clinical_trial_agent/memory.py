@@ -9,27 +9,14 @@ import asyncpg
 from cryptography.fernet import Fernet
 from loguru import logger
 from tools.memory_audit_feedback import MemoryAuditFeedbackMixin
-from tools.memory_helpers import (
-    DDL as _DDL,
-)
-from tools.memory_helpers import (
-    SCHEMA_VERSION as _SCHEMA_VERSION,
-)
-from tools.memory_helpers import (
-    deserialize_encrypted_json as _deserialize_encrypted_json,
-)
-from tools.memory_helpers import (
-    get_checkpointer,
-)
-from tools.memory_helpers import (
-    get_fernet_key as _get_fernet_key,
-)
-from tools.memory_helpers import (
-    get_profile_hash_salt as _get_profile_hash_salt,
-)
-from tools.memory_helpers import (
-    serialize_encrypted_json as _serialize_encrypted_json,
-)
+from tools.memory_helpers import DDL as _DDL
+from tools.memory_helpers import SCHEMA_VERSION as _SCHEMA_VERSION
+from tools.memory_helpers import deserialize_encrypted_json as _deserialize_encrypted_json
+from tools.memory_helpers import get_checkpointer
+from tools.memory_helpers import get_fernet_key as _get_fernet_key
+from tools.memory_helpers import get_profile_hash_salt as _get_profile_hash_salt
+from tools.memory_helpers import serialize_encrypted_json as _serialize_encrypted_json
+from tools.memory_schema import setup_memory_schema as _setup_memory_schema
 from tools.postgres_base import PostgresBase
 
 from clinical_trial_agent.config import get_settings
@@ -131,158 +118,7 @@ class EpisodicMemory(MemoryAuditFeedbackMixin, PostgresBase):
         )
 
     async def _setup_schema(self, conn: asyncpg.Connection) -> None:
-        async with conn.transaction():
-            await conn.execute(_DDL)
-            await conn.execute("ALTER TABLE patient_runs ADD COLUMN IF NOT EXISTS tenant_id TEXT")
-            await conn.execute("ALTER TABLE patient_runs ADD COLUMN IF NOT EXISTS facility_id TEXT")
-            await conn.execute(
-                "ALTER TABLE pipeline_audit_log ADD COLUMN IF NOT EXISTS tenant_id TEXT"
-            )
-            await conn.execute(
-                "ALTER TABLE pipeline_audit_log ADD COLUMN IF NOT EXISTS facility_id TEXT"
-            )
-            await conn.execute(
-                "ALTER TABLE physician_feedback ADD COLUMN IF NOT EXISTS tenant_id TEXT"
-            )
-            await conn.execute(
-                "ALTER TABLE physician_feedback ADD COLUMN IF NOT EXISTS facility_id TEXT"
-            )
-            await conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_patient_runs_tenant_facility ON patient_runs (tenant_id, facility_id, created_at DESC)"
-            )
-            await conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_pipeline_audit_log_tenant_facility ON pipeline_audit_log (tenant_id, facility_id, timestamp DESC)"
-            )
-            await conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_physician_feedback_tenant_facility ON physician_feedback (tenant_id, facility_id, created_at DESC)"
-            )
-            await conn.execute(
-                """
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_patient_runs_tenant_facility_profile
-                ON patient_runs (tenant_id, facility_id, profile_hash)
-                """
-            )
-            await conn.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_physician_feedback_lookup
-                ON physician_feedback (tenant_id, facility_id, profile_hash, created_at DESC)
-                """
-            )
-            row = await conn.fetchrow("SELECT version FROM schema_version LIMIT 1")
-            current_version = int(row["version"]) if row and "version" in row else 0
-
-            if current_version < 6:
-                await conn.execute("ALTER TABLE llm_cache ADD COLUMN IF NOT EXISTS prefix TEXT")
-                needs_backfill = await conn.fetchval(
-                    "SELECT EXISTS (SELECT 1 FROM llm_cache WHERE prefix IS NULL LIMIT 1)"
-                )
-                if bool(needs_backfill):
-                    await conn.execute("UPDATE llm_cache SET prefix = '' WHERE prefix IS NULL")
-                await conn.execute("ALTER TABLE llm_cache ALTER COLUMN prefix SET NOT NULL")
-                await conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_llm_cache_prefix ON llm_cache (prefix)"
-                )
-
-            if current_version < 7:
-                await conn.execute(
-                    """
-                    ALTER TABLE pipeline_audit_log
-                    ALTER COLUMN outcome_tier_counts
-                    TYPE JSONB
-                    USING
-                        CASE
-                            WHEN outcome_tier_counts IS NULL THEN '{}'::jsonb
-                            WHEN pg_typeof(outcome_tier_counts)::text = 'jsonb' THEN outcome_tier_counts
-                            ELSE outcome_tier_counts::text::jsonb
-                        END
-                    """
-                )
-
-            if current_version < 8:
-                await conn.execute(
-                    """
-                    DO $$
-                    BEGIN
-                        ALTER TABLE patient_runs
-                        ADD CONSTRAINT patient_runs_tenant_nonempty
-                        CHECK (tenant_id IS NOT NULL AND tenant_id <> '') NOT VALID;
-                    EXCEPTION WHEN duplicate_object THEN NULL;
-                    END $$;
-                    """
-                )
-                await conn.execute(
-                    """
-                    DO $$
-                    BEGIN
-                        ALTER TABLE patient_runs
-                        ADD CONSTRAINT patient_runs_facility_nonempty
-                        CHECK (facility_id IS NOT NULL AND facility_id <> '') NOT VALID;
-                    EXCEPTION WHEN duplicate_object THEN NULL;
-                    END $$;
-                    """
-                )
-                await conn.execute(
-                    """
-                    DO $$
-                    BEGIN
-                        ALTER TABLE pipeline_audit_log
-                        ADD CONSTRAINT pipeline_audit_tenant_nonempty
-                        CHECK (tenant_id IS NOT NULL AND tenant_id <> '') NOT VALID;
-                    EXCEPTION WHEN duplicate_object THEN NULL;
-                    END $$;
-                    """
-                )
-                await conn.execute(
-                    """
-                    DO $$
-                    BEGIN
-                        ALTER TABLE pipeline_audit_log
-                        ADD CONSTRAINT pipeline_audit_facility_nonempty
-                        CHECK (facility_id IS NOT NULL AND facility_id <> '') NOT VALID;
-                    EXCEPTION WHEN duplicate_object THEN NULL;
-                    END $$;
-                    """
-                )
-                await conn.execute(
-                    """
-                    DO $$
-                    BEGIN
-                        ALTER TABLE physician_feedback
-                        ADD CONSTRAINT physician_feedback_tenant_nonempty
-                        CHECK (tenant_id IS NOT NULL AND tenant_id <> '') NOT VALID;
-                    EXCEPTION WHEN duplicate_object THEN NULL;
-                    END $$;
-                    """
-                )
-                await conn.execute(
-                    """
-                    DO $$
-                    BEGIN
-                        ALTER TABLE physician_feedback
-                        ADD CONSTRAINT physician_feedback_facility_nonempty
-                        CHECK (facility_id IS NOT NULL AND facility_id <> '') NOT VALID;
-                    EXCEPTION WHEN duplicate_object THEN NULL;
-                    END $$;
-                    """
-                )
-                await conn.execute(
-                    """
-                    DO $$
-                    BEGIN
-                        ALTER TABLE physician_feedback
-                        ADD CONSTRAINT physician_feedback_verdict_check
-                        CHECK (verdict IN ('confirmed', 'rejected')) NOT VALID;
-                    EXCEPTION WHEN duplicate_object THEN NULL;
-                    END $$;
-                    """
-                )
-
-            if row is None:
-                await conn.execute(
-                    "INSERT INTO schema_version (version) VALUES ($1)", _SCHEMA_VERSION
-                )
-            elif current_version < _SCHEMA_VERSION:
-                await conn.execute("UPDATE schema_version SET version = $1", _SCHEMA_VERSION)
+        await _setup_memory_schema(conn, ddl=_DDL, schema_version=_SCHEMA_VERSION)
 
     async def lookup(self, patient_profile: dict[str, Any]) -> dict[str, Any] | None:
         tenant_id, facility_id = _tenant_context()

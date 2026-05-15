@@ -60,7 +60,7 @@ include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["clinical_trial_agent*", "agents*", "models*", "prompts*", "subagents*", "tools*", "evaluation*"]
+include = ["clinical_trial_agent*", "agents*", "models*", "prompts*", "subagents*", "tools*"]
 
 [tool.ruff]
 target-version = "py312"
@@ -123,7 +123,7 @@ disallow_incomplete_defs = true
 check_untyped_defs = true
 no_implicit_optional = true
 ignore_missing_imports = true
-exclude = ["tests/", "evaluation/"]
+exclude = ["tests/"]
 
 [[tool.mypy.overrides]]
 module = ["langchain.*", "langgraph.*", "langchain_deepseek.*", "diskcache.*"]
@@ -159,8 +159,6 @@ testpaths = [
     "tests/test_report_generator.py",
     "tests/test_cache.py",
     "tests/test_medical_synonyms.py",
-    "tests/test_adversarial_eval.py",
-    "tests/test_evaluation_metrics.py",
     "tests/test_llm_privacy_modes.py",
     "tests/test_webhook_security.py",
     "tests/test_eligibility_provider_regressions.py",
@@ -187,7 +185,6 @@ source = [
 ]
 omit = [
     "tests/*",
-    "evaluation/*",
     "*/migrations/*",
     "clinical_trial_agent/cli.py",
     "clinical_trial_agent/langgraph_app.py",

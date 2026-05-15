@@ -34,6 +34,8 @@ def _make_key(prefix: str, data: Any) -> str:
 
 
 def get_cached(prefix: str, params: Any) -> Any | None:
+    if not get_settings().use_cache:
+        return None
     key = _make_key(prefix, params)
     try:
         return _cache.get(key)
@@ -48,6 +50,8 @@ def set_cached(
     value: Any,
     ttl_seconds: int | None = None,
 ) -> None:
+    if not get_settings().use_cache:
+        return
     key = _make_key(prefix, params)
     ttl = ttl_seconds if ttl_seconds is not None else get_settings().cache_ttl_seconds
     try:

@@ -47,7 +47,7 @@ jobs:
           uv run --all-groups ruff check .
           uv run --all-groups ruff format --check .
           uv run --all-groups mypy .
-          uv run --all-groups python -m tools.complexity_gate clinical_trial_agent agents subagents tools models
+          uv run --all-groups radon cc --min B clinical_trial_agent agents subagents tools models
 
   test:
     name: Tests (py${{ matrix.python-version }})

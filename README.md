@@ -6,7 +6,7 @@
 
 Async, multi-agent clinical trial matching built with **LangGraph**.
 
-The pipeline takes a patient profile, retrieves candidate studies from ClinicalTrials.gov, evaluates eligibility, and produces a ranked report for clinical review. It also includes PostgreSQL-backed episodic memory, cached verdicts, and fail-closed safety controls for clinical-data workflows.
+The pipeline takes a patient profile, retrieves candidate studies from ClinicalTrials.gov, assesses eligibility, and produces a ranked report for clinical review. It also includes PostgreSQL-backed episodic memory, cached verdicts, and fail-closed safety controls for clinical-data workflows.
 
 > [!WARNING]
 > This project is **not certified for real patient care workflows**. Use it only after the appropriate clinical, legal, security, and compliance review.
@@ -230,17 +230,6 @@ uv run clinical-trial-agent run ./patient_profile.json
 
 Coverage is gated at **75%** in CI.
 
-Run offline clinical evaluation with synthetic fixtures:
-
-```bash
-make eval
-```
-
-The reports are written to `evaluation/reports/latest_eval_report.json` and
-`evaluation/reports/latest_eval_report.md`. See `evaluation/README.md` for
-metric definitions, thresholds, prompt-injection checks, and calibration
-interpretation.
-
 ## Docker and Dev Containers
 
 - `docker-compose.yml` starts the application and PostgreSQL locally
@@ -283,8 +272,8 @@ If the proxy is already running when the CLI starts, it is reused as-is.
 ## Project Layout
 
 ```text
-agents/                    Orchestration and reasoning modules
-subagents/                 Retrieval, eligibility, and synthesis graphs
+agents/                    Orchestration plus focused helper submodules
+subagents/                 Retrieval, eligibility, and synthesis graphs + node helpers
 models/                    Pydantic models
 prompts/                   Prompt templates
 tools/                     Cache, retry, DB, validation, and telemetry helpers

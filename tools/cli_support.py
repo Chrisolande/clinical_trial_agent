@@ -1,6 +1,8 @@
 """Utility helpers shared by CLI commands."""
 
+import ipaddress
 import json
+import os
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -34,10 +36,61 @@ async def with_memory() -> EpisodicMemory:
     return memory
 
 
-def validate_webhook_url(url: str) -> None:
+_METADATA_IPS = {
+    ipaddress.ip_address("169.254.169.254"),
+    ipaddress.ip_address("100.100.100.200"),
+}
+
+
+def _allowed_webhook_hosts() -> set[str]:
+    raw = os.getenv("WEBHOOK_ALLOWED_HOSTS", "")
+    return {host.strip().lower() for host in raw.split(",") if host.strip()}
+
+
+def _is_blocked_webhook_host(hostname: str) -> bool:
+    host = hostname.strip().strip("[]").lower()
+    if host == "localhost":
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return (
+        ip.is_loopback
+        or ip.is_private
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+        or ip in _METADATA_IPS
+    )
+
+
+def validate_webhook_url(url: str, *, allow_local: bool = False) -> None:
     parsed = urlparse(url)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise typer.BadParameter("--webhook-url must be a valid http(s) URL")
+    _validate_webhook_scheme(parsed.scheme, parsed.netloc, parsed.hostname, allow_local)
+    if parsed.username or parsed.password:
+        raise typer.BadParameter("--webhook-url must not include embedded credentials")
+    hostname = parsed.hostname
+    if not hostname:
+        raise typer.BadParameter("--webhook-url must include a host")
+
+    allowed_hosts = _allowed_webhook_hosts()
+    if allowed_hosts and hostname.lower() not in allowed_hosts:
+        raise typer.BadParameter("--webhook-url host is not in WEBHOOK_ALLOWED_HOSTS")
+
+    env_allows_local = os.getenv("ALLOW_LOCAL_WEBHOOK", "false").strip().lower() == "true"
+    if _is_blocked_webhook_host(hostname) and not (allow_local or env_allows_local):
+        raise typer.BadParameter("--webhook-url targets a local or private address")
+
+
+def _validate_webhook_scheme(
+    scheme: str, netloc: str, hostname: str | None, allow_local: bool
+) -> None:
+    if scheme == "https" and netloc:
+        return
+    if allow_local and scheme == "http" and hostname:
+        return
+    raise typer.BadParameter("--webhook-url must be a valid HTTPS URL")
 
 
 def load_text_profile(path: Path) -> str:

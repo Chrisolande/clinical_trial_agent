@@ -140,29 +140,36 @@ def _legacy_expand(tokens: set[str]) -> set[str]:
     compact_inputs.discard("")
 
     for canonical, matchers in alias_matchers.items():
-        if canonical == "sclc" and ("nsclc" in expanded or "non" in expanded):
-            # Guard against matching "small cell" inside "non-small cell".
+        if not _alias_matches(canonical, matchers, expanded, compact_inputs):
             continue
-        matched = False
-        for candidate_tokens, candidate_compact in matchers:
-            if candidate_tokens and candidate_tokens.issubset(expanded):
-                matched = True
-                break
-            if candidate_compact and candidate_compact in compact_inputs:
-                matched = True
-                break
-        if not matched:
-            continue
-
-        expanded.add(canonical)
-        expanded.add(_compact_form(canonical))
-        for phrase in _CONDITION_SYNONYMS_FALLBACK.get(canonical, []):
-            compact_phrase = _compact_form(phrase)
-            if compact_phrase:
-                expanded.add(compact_phrase)
+        _add_canonical_synonyms(expanded, canonical)
 
     expanded.discard("")
     return expanded
+
+
+def _alias_matches(
+    canonical: str,
+    matchers: list[tuple[set[str], str]],
+    expanded: set[str],
+    compact_inputs: set[str],
+) -> bool:
+    if canonical == "sclc" and ("nsclc" in expanded or "non" in expanded):
+        return False
+    return any(
+        (candidate_tokens and candidate_tokens.issubset(expanded))
+        or (candidate_compact and candidate_compact in compact_inputs)
+        for candidate_tokens, candidate_compact in matchers
+    )
+
+
+def _add_canonical_synonyms(expanded: set[str], canonical: str) -> None:
+    expanded.add(canonical)
+    expanded.add(_compact_form(canonical))
+    for phrase in _CONDITION_SYNONYMS_FALLBACK.get(canonical, []):
+        compact_phrase = _compact_form(phrase)
+        if compact_phrase:
+            expanded.add(compact_phrase)
 
 
 def _extract_with_term_parser(tokens: set[str], parser: Any) -> set[str]:

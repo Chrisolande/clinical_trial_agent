@@ -1,5 +1,6 @@
 """ClinicalTrials.gov payload parsing helpers."""
 
+from datetime import UTC, datetime
 from typing import Any
 
 
@@ -42,33 +43,9 @@ def parse_trial_from_response(study: dict[str, Any]) -> dict[str, Any]:
     arms_mod = sec("armsInterventionsModule")
 
     phases = design_mod.get("phases", [])
-    locations = [
-        {
-            "facility": loc.get("facility"),
-            "city": loc.get("city"),
-            "state": loc.get("state"),
-            "country": loc.get("country"),
-            "status": loc.get("status"),
-        }
-        for loc in contacts_mod.get("locations", [])
-    ]
-    primary_outcomes = [
-        {
-            "measure": o.get("measure", ""),
-            "time_frame": o.get("timeFrame"),
-            "description": o.get("description"),
-        }
-        for o in outcomes_mod.get("primaryOutcomes", [])
-    ]
-    interventions = [name for arm in arms_mod.get("interventions", []) if (name := arm.get("name"))]
-
-    completion_date_obj = status_mod.get("primaryCompletionDateStruct", {})
-    completion_date = (
-        completion_date_obj.get("date") if isinstance(completion_date_obj, dict) else None
-    )
-
     raw_criteria = elig_mod.get("eligibilityCriteria")
     inclusion_text, exclusion_text = _split_eligibility_criteria(str(raw_criteria or ""))
+    has_criteria = isinstance(raw_criteria, str) and bool(raw_criteria.strip())
 
     parsed = {
         "nct_id": id_mod.get("nctId", ""),
@@ -78,21 +55,58 @@ def parse_trial_from_response(study: dict[str, Any]) -> dict[str, Any]:
         "phase": ", ".join(phases) if phases else None,
         "lead_sponsor": _get(sec("sponsorCollaboratorsModule"), "leadSponsor", "name"),
         "eligibility_criteria_raw": raw_criteria,
-        "locations": locations,
-        "primary_outcomes": primary_outcomes,
-        "primary_completion_date": completion_date,
+        "criteria_source": "ctgov_api" if has_criteria else "missing",
+        "criteria_source_verified": has_criteria,
+        "criteria_retrieved_at": datetime.now(UTC).isoformat(),
+        "criteria_completeness": "full" if has_criteria else "missing",
+        "locations": _parse_locations(contacts_mod),
+        "primary_outcomes": _parse_primary_outcomes(outcomes_mod),
+        "primary_completion_date": _primary_completion_date(status_mod),
         "minimum_age": elig_mod.get("minimumAge"),
         "maximum_age": elig_mod.get("maximumAge"),
         "sex_eligibility": elig_mod.get("sex"),
         "healthy_volunteers": elig_mod.get("healthyVolunteers"),
         "brief_summary": _get(sec("descriptionModule"), "briefSummary"),
         "conditions": sec("conditionsModule").get("conditions", []),
-        "interventions": interventions,
+        "interventions": _parse_interventions(arms_mod),
     }
-    if isinstance(raw_criteria, str) and raw_criteria.strip():
+    if has_criteria:
         parsed["inclusion_criteria_parsed"] = inclusion_text
         parsed["exclusion_criteria_parsed"] = exclusion_text
     return parsed
+
+
+def _parse_locations(contacts_mod: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {
+            "facility": loc.get("facility"),
+            "city": loc.get("city"),
+            "state": loc.get("state"),
+            "country": loc.get("country"),
+            "status": loc.get("status"),
+        }
+        for loc in contacts_mod.get("locations", [])
+    ]
+
+
+def _parse_primary_outcomes(outcomes_mod: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {
+            "measure": outcome.get("measure", ""),
+            "time_frame": outcome.get("timeFrame"),
+            "description": outcome.get("description"),
+        }
+        for outcome in outcomes_mod.get("primaryOutcomes", [])
+    ]
+
+
+def _parse_interventions(arms_mod: dict[str, Any]) -> list[str]:
+    return [name for arm in arms_mod.get("interventions", []) if (name := arm.get("name"))]
+
+
+def _primary_completion_date(status_mod: dict[str, Any]) -> Any:
+    completion_date_obj = status_mod.get("primaryCompletionDateStruct", {})
+    return completion_date_obj.get("date") if isinstance(completion_date_obj, dict) else None
 
 
 def extract_studies(data: dict[str, Any]) -> list[dict[str, Any]]:

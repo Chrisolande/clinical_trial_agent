@@ -39,7 +39,7 @@ QA issues are structured as: `code`, `severity`, `message`.
 
 - Supported severity values: `critical`, `high`, `medium`, `low`.
 - QA is fail-closed on `critical` findings (`qa_passed=false`).
-- Synthesis blocks report generation when QA fails; unresolved QA failures trigger re-evaluation signaling.
+- Synthesis blocks report generation when QA fails; unresolved QA failures trigger upstream retry signaling.
 
 ## Deterministic medication safety controls
 

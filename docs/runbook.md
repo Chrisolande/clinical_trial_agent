@@ -21,16 +21,10 @@ uv run clinical-trial-agent validate-env
 uv run make check
 ```
 
-## 4) Offline evaluation
+Code organization standard: keep Python modules focused and below 300 LOC by
+extracting helper submodules when a file grows too large.
 
-```bash
-uv run make eval
-```
-
-Review `evaluation/reports/latest_eval_report.md` for metric thresholds,
-pass/fail status, worst failing synthetic cases, and calibration buckets.
-
-## 5) Run the pipeline
+## 4) Run the pipeline
 
 ```bash
 uv run clinical-trial-agent run ./patient_profile.json

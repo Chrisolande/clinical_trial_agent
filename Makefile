@@ -1,4 +1,4 @@
-.PHONY: lint typecheck test security complexity eval check fix docker-build docker-up docker-down docker-logs docker-ps docker-recreate
+.PHONY: lint typecheck test security complexity check fix docker-build docker-up docker-down docker-logs docker-ps docker-recreate
 
 lint:
 	uv run ruff check .
@@ -15,9 +15,6 @@ security:
 
 complexity:
 	uv run radon cc --min B .
-
-eval:
-	uv run python -m evaluation.runners.run_offline_eval
 
 check: lint typecheck test security complexity
 

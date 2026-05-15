@@ -10,8 +10,6 @@ patient_profile.json
 .secrets.baseline
 coverage.xml
 htmlcov/
-evaluation/reports/latest_eval_report.json
-evaluation/reports/latest_eval_report.md
 .ruff_cache
 .mypy_cache
 .coverage

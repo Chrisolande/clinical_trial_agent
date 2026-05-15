@@ -22,6 +22,15 @@ def test_settings_max_trials_defaults_to_query_limit() -> None:
     assert settings.max_trials_for_eligibility == 17
 
 
+def test_settings_privacy_mode_normalization() -> None:
+    settings = Settings(
+        llm_privacy_mode="DEIDENTIFIED",
+        database_uri="postgresql://x",
+        memory_db_dsn="postgresql://x",
+    )
+    assert settings.llm_privacy_mode == "deidentified"
+
+
 def test_settings_ctgov_proxy_url_allows_loopback_http() -> None:
     settings = Settings(
         ctgov_proxy_url="http://localhost:8000/ctgov/search",
