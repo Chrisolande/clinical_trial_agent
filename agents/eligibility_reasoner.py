@@ -53,7 +53,9 @@ async def _judge_trial(
         try:
             parsed = json.loads(cleaned)
             if isinstance(parsed, dict):
-                return validate_verdict(parsed, trial_id)
+                # Raw string responses (even valid JSON) should be treated as unstructured
+                # to avoid accepting high-trust outputs from non-structured providers.
+                return fallback_verdict_for_exception(Exception("LLM parsing failed"), trial_id, patient_profile, criteria)
         except (json.JSONDecodeError, TypeError, ValueError):
             # One more attempt to extract json block
             start = cleaned.find("{")

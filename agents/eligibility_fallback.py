@@ -135,10 +135,21 @@ def fallback_verdict_for_exception(
         type(exc).__name__,
         exc,
     )
+    # Distinguish parsing failures from other generic errors so tests and logs remain clear
+    msg = str(exc)
+    if "LLM parsing failed" in msg or "parsing failed" in msg or "parsing" in msg.lower():
+        return validate_verdict(
+            _make_fallback(
+                "LLM response parsing failed",
+                "LLM response parsing failed; conservative weak tier assigned.",
+                "Additional clinical review recommended.",
+            ),
+            trial_id,
+        )
     return validate_verdict(
         _make_fallback(
-            "LLM response parsing failed",
-            "LLM response parsing failed; conservative weak tier assigned.",
+            "Eligibility judge error",
+            "Eligibility judge error; conservative weak tier assigned.",
             "Additional clinical review recommended.",
         ),
         trial_id,
