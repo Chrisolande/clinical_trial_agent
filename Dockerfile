@@ -1,7 +1,6 @@
 # syntax=docker/dockerfile:1.7
-# python:3.13-slim is intentionally not digest-pinned here because this image is
-# rebuilt by scheduled CI and scanned with Trivy to pick up patched Debian layers.
-FROM python:3.13-slim
+
+FROM python:3.12-slim
 
 LABEL org.opencontainers.image.title="clinical-trial-agent" \
   org.opencontainers.image.description="Async LangGraph clinical trial matching agent" \
