@@ -1,0 +1,256 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+      - master
+  push:
+    branches:
+      - main
+      - master
+      - "releases/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  QUALITY_COVERAGE_MIN: "65"
+
+jobs:
+  lint:
+    name: Lint & Complexity (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install dev dependencies
+        run: uv sync --locked --all-groups
+
+      - name: Run lint targets
+        run: |
+          uv run --all-groups ruff check .
+          uv run --all-groups ruff format --check .
+          uv run --all-groups mypy .
+          uv run --all-groups radon cc --min B clinical_trial_agent agents subagents
+
+  test:
+    name: Tests (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres # pragma: allowlist secret
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=5
+
+    env:
+      DATABASE_URI: postgresql://postgres:postgres@localhost:5432/postgres # pragma: allowlist secret
+      MEMORY_DB_DSN: postgresql://postgres:postgres@localhost:5432/postgres # pragma: allowlist secret
+      DEEPSEEK_API_KEY: dummy-key-for-testing # pragma: allowlist secret
+      PROFILE_HASH_SALT: ci-test-salt
+      DB_ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY= # pragma: allowlist secret
+      TENANT_ID: ci-tenant
+      FACILITY_ID: ci-facility
+      CLINICAL_DATA_EXTERNAL_LLM_CONSENT: "false"
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install dependencies
+        run: uv sync --locked --all-groups
+
+      - name: Run tests with coverage
+        run: |
+          uv run --all-groups pytest \
+            --cov=clinical_trial_agent \
+            --cov=agents \
+            --cov=subagents \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --cov-fail-under=${{ env.QUALITY_COVERAGE_MIN }}
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-py${{ matrix.python-version }}
+          path: coverage.xml
+          if-no-files-found: ignore
+
+      - name: Upload coverage to Codecov
+        if: matrix.python-version == '3.12'
+        continue-on-error: true
+        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
+        with:
+          files: ./coverage.xml
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  security:
+    name: Security checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install dev dependencies
+        run: uv sync --locked --all-groups
+
+      - name: Enforce secret scanning baseline policy
+        run: |
+          python - <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          baseline = Path(".secrets.baseline")
+          if not baseline.exists():
+              print("Missing .secrets.baseline; fail-closed secret policy enforcement requires it.")
+              sys.exit(1)
+
+          data = json.loads(baseline.read_text(encoding="utf-8"))
+          policies = [
+              f
+              for f in data.get("filters_used", [])
+              if f.get("path") == "detect_secrets.filters.common.is_ignored_due_to_verification_policies"
+          ]
+
+          if not policies:
+              print("Missing detect-secrets verification policy filter in .secrets.baseline.")
+              sys.exit(1)
+
+          min_level = policies[0].get("min_level")
+          if not isinstance(min_level, int) or min_level < 2:
+              print("detect-secrets min_level must be >= 2 for fail-closed CI policy.")
+              sys.exit(1)
+
+          print("Secret scanning baseline policy check passed.")
+          PY
+
+      - name: Secret scan
+        run: uv run --all-groups detect-secrets-hook --baseline .secrets.baseline $(git ls-files)
+
+      - name: Verify CI env hardening consistency
+        run: |
+          python - <<'PY'
+          import sys
+          from pathlib import Path
+
+          workflow_text = "\n".join(
+              path.read_text(encoding="utf-8")
+              for path in Path(".github/workflows").glob("*.yml")
+          )
+
+          required = [
+              'DEEPSEEK_API_KEY: dummy-key-for-testing',
+              'PROFILE_HASH_SALT: ci-test-salt',
+              'TENANT_ID: ci-tenant',
+              'FACILITY_ID: ci-facility',
+              'CLINICAL_DATA_EXTERNAL_LLM_CONSENT: "false"',
+          ]
+
+          forbidden = [
+              'CLINICAL_DATA_EXTERNAL_LLM_CONSENT: "true"',
+              'TENANT_ID: default-tenant',
+              'FACILITY_ID: default-facility',
+          ]
+
+          for value in required:
+              if value not in workflow_text:
+                  print(f"Missing required CI hardening value: {value}")
+                  sys.exit(1)
+
+          for value in forbidden:
+              if value in workflow_text:
+                  print(f"Found forbidden CI hardening value: {value}")
+                  sys.exit(1)
+
+          print("CI env hardening consistency check passed.")
+          PY
+
+      - name: Run Bandit security checks
+        run: uv run --all-groups bandit -r clinical_trial_agent agents subagents -ll
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@0a97817b6ade9f46837855d676c4cca3a2471fc9 # v4
+        with:
+          context: .
+          load: true
+          tags: clinical-trial-agent:ci
+          cache-from: type=gha,scope=docker-ci
+          cache-to: type=gha,mode=max,scope=docker-ci
+
+      - name: Smoke test Docker image
+        run: docker run --rm clinical-trial-agent:ci --help
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: clinical-trial-agent:ci
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.spdx.json
+          if-no-files-found: error
