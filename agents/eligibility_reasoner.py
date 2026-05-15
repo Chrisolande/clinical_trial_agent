@@ -73,7 +73,8 @@ async def _judge_trial(
         trial_id,
         type(response).__name__,
     )
-    return validate_verdict(dict(FALLBACK_VERDICT), trial_id)
+    # Treat non-structured responses as a parsing failure to get a consistent fallback
+    return fallback_verdict_for_exception(Exception("LLM parsing failed"), trial_id, patient_profile, criteria)
 
 
 def _build_verdict_rows(verdict: JudgeVerdict) -> list[dict[str, Any]]:

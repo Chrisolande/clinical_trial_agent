@@ -137,8 +137,8 @@ def fallback_verdict_for_exception(
     )
     return validate_verdict(
         _make_fallback(
-            "Eligibility judge error",
-            "Eligibility judge error; conservative weak tier assigned.",
+            "LLM response parsing failed",
+            "LLM response parsing failed; conservative weak tier assigned.",
             "Additional clinical review recommended.",
         ),
         trial_id,
