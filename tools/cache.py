@@ -6,13 +6,13 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import asyncpg
-from diskcache import Cache
+from diskcache import Cache, JSONDisk
 from loguru import logger
 
 from clinical_trial_agent.config import get_settings
 from tools.postgres_base import PostgresBase
 
-_cache = Cache(get_settings().cache_dir)
+_cache = Cache(get_settings().cache_dir, disk=JSONDisk)
 
 _DDL = """
     CREATE TABLE IF NOT EXISTS llm_cache (

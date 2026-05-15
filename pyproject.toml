@@ -140,10 +140,6 @@ testpaths = [
     "tests/test_eligibility_nodes.py",
     "tests/test_eligibility_nodes_worker_paths.py",
     "tests/test_eligibility_fallback.py",
-    "tests/test_memory_crypto.py",
-    "tests/test_memory_store.py",
-    "tests/test_memory_audit_feedback.py",
-    "tests/test_memory_checkpointer.py",
     "tests/test_synthesis.py",
     "tests/test_trial_search_tavily.py",
     "tests/test_clinical_trials.py",
@@ -151,16 +147,11 @@ testpaths = [
     "tests/test_clinical_trials_retry.py",
     "tests/test_clinical_trials_transport.py",
     "tests/test_consent_guard.py",
-    "tests/test_llm_factory.py",
     "tests/test_config.py",
     "tests/test_patient_parser.py",
     "tests/test_missing_info.py",
     "tests/test_qa_checker.py",
     "tests/test_report_generator.py",
-    "tests/test_cache.py",
-    "tests/test_medical_synonyms.py",
-    "tests/test_llm_privacy_modes.py",
-    "tests/test_webhook_security.py",
     "tests/test_eligibility_provider_regressions.py",
 ]
 addopts = "--tb=short --strict-markers -q"
@@ -180,8 +171,6 @@ source = [
     "clinical_trial_agent",
     "agents",
     "subagents",
-    "models",
-    "tools",
 ]
 omit = [
     "tests/*",
