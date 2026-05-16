@@ -1,141 +1,147 @@
-"""Shared helpers for constructing trial search queries."""
+"""Shared helpers for constructing broad, disease-agnostic trial search queries."""
 
+from __future__ import annotations
+
+import json
 from typing import Any
 
 
-def _resolve_status(include_nyr: bool) -> list[str]:
-    return ["RECRUITING", "NOT_YET_RECRUITING"] if include_nyr else ["RECRUITING"]
+DEFAULT_STATUSES = ["RECRUITING"]
+BROAD_STATUSES = ["RECRUITING", "NOT_YET_RECRUITING", "ACTIVE_NOT_RECRUITING"]
 
+MISSING_MARKERS = {
+    "",
+    "unknown",
+    "not reported",
+    "not yet performed",
+    "missing",
+    "not available",
+    "pending",
+}
 
-def _primary_condition(normalized: dict[str, Any], profile: dict[str, Any]) -> str | None:
-    terms = normalized.get("primary_search_terms", [])
-    conds = profile.get("conditions", [])
-    return (
-        (terms[0] if terms else None)
-        or profile.get("primary_condition")
-        or (conds[0] if conds else None)
-    )
+NEGATIVE_PREFIXES = (
+    "no ",
+    "negative for ",
+    "absence of ",
+)
 
 
 def _as_term(value: Any) -> str:
-    return str(value).strip()
+    return str(value or "").strip()
 
 
-def _collect_intervention_terms(
+def _dedupe(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        cleaned = " ".join(_as_term(value).split())
+        key = cleaned.lower()
+        if cleaned and key not in seen:
+            seen.add(key)
+            out.append(cleaned)
+    return out
+
+
+def _resolve_status(include_nyr: bool) -> list[str]:
+    return BROAD_STATUSES if include_nyr else DEFAULT_STATUSES
+
+
+def _looks_searchable_condition(term: str) -> bool:
+    lowered = term.lower().strip()
+    if not lowered:
+        return False
+    if lowered.startswith(NEGATIVE_PREFIXES):
+        return False
+    if "no known" in lowered or "not pregnant" in lowered:
+        return False
+    if len(lowered) > 140:
+        return False
+    return True
+
+
+def _collect_condition_terms(
     normalized: dict[str, Any],
     profile: dict[str, Any],
 ) -> list[str]:
     terms: list[str] = []
-    for value in normalized.get("intervention_search_terms", []):
+
+    for value in normalized.get("primary_search_terms", []):
         term = _as_term(value)
-        if term:
+        if _looks_searchable_condition(term):
             terms.append(term)
 
-    for medication in profile.get("medications", []):
-        if isinstance(medication, dict):
-            term = _as_term(medication.get("name", ""))
-        else:
-            term = _as_term(medication)
-        if term:
+    primary = _as_term(profile.get("primary_condition"))
+    if _looks_searchable_condition(primary):
+        terms.append(primary)
+
+    for condition in profile.get("conditions", []):
+        term = _as_term(condition)
+        if _looks_searchable_condition(term):
             terms.append(term)
 
-    for treatment in profile.get("prior_treatments", []):
-        term = _as_term(treatment)
-        if term:
-            terms.append(term)
-    return list(dict.fromkeys(terms))
+    return _dedupe(terms)
 
 
 def _collect_biomarker_terms(profile: dict[str, Any]) -> list[str]:
     terms: list[str] = []
+
     for biomarker in profile.get("biomarkers", []):
-        if isinstance(biomarker, dict):
-            name = _as_term(biomarker.get("name", ""))
-            result = _as_term(biomarker.get("result", ""))
-            text = " ".join(part for part in [name, result] if part)
-        else:
-            text = _as_term(biomarker)
+        if not isinstance(biomarker, dict):
+            term = _as_term(biomarker)
+            if term:
+                terms.append(term)
+            continue
+
+        name = _as_term(biomarker.get("name"))
+        result = _as_term(biomarker.get("result"))
+        result_key = result.lower()
+
+        if not name or result_key in MISSING_MARKERS:
+            continue
+
+        # Keep clinically useful positive/actionable markers.
+        text = " ".join(part for part in [name, result] if part)
         if text:
             terms.append(text)
-    return list(dict.fromkeys(terms))
+
+    return _dedupe(terms)
 
 
-def _condition_variants(normalized: dict[str, Any], profile: dict[str, Any]) -> list[str]:
-    base_terms = [_as_term(t) for t in normalized.get("primary_search_terms", []) if _as_term(t)]
-    primary = _as_term(profile.get("primary_condition", ""))
-    if primary:
-        base_terms.append(primary)
-    base_terms.extend(_as_term(c) for c in profile.get("conditions", []) if _as_term(c))
-    deduped_base = list(dict.fromkeys(base_terms))
-    if not deduped_base:
-        return []
+def _collect_preference_terms(profile: dict[str, Any]) -> list[str]:
+    terms: list[str] = []
 
-    biomarkers = _collect_biomarker_terms(profile)
-    variants: list[str] = list(deduped_base)
-    for base in deduped_base[:2]:
-        for marker in biomarkers[:2]:
-            variants.append(f"{base} {marker}")
-    return list(dict.fromkeys(variants))
+    for preference in profile.get("trial_preferences", []):
+        text = _as_term(preference)
+        if not text:
+            continue
 
+        lowered = text.lower()
+        if "interested in " in lowered:
+            terms.append(text.split("interested in ", 1)[-1])
+        elif "prefers " in lowered:
+            terms.append(text.split("prefers ", 1)[-1])
+        else:
+            terms.append(text)
 
-def _build_primary_query(
-    normalized: dict[str, Any],
-    profile: dict[str, Any],
-    primary: str | None,
-    statuses: list[str],
-) -> dict[str, Any] | None:
-    condition_terms = _condition_variants(normalized, profile)
-    if not condition_terms and not primary:
-        return None
-    interventions = _collect_intervention_terms(normalized, profile)
-    query: dict[str, Any] = {
-        "condition": condition_terms[0] if condition_terms else _as_term(primary),
-        "status": statuses,
-    }
-    if interventions:
-        query["intervention"] = interventions[0]
-    return query
+    return _dedupe(terms)
 
 
-def _build_intervention_query(
-    normalized: dict[str, Any],
-    profile: dict[str, Any],
-    primary: str | None,
-    statuses: list[str],
-) -> dict[str, Any] | None:
-    itrms = _collect_intervention_terms(normalized, profile)
-    if not itrms:
-        return None
-    condition_terms = _condition_variants(normalized, profile)
-    base: dict[str, Any] = {
-        "intervention": itrms[1] if len(itrms) > 1 else itrms[0],
-        "status": statuses,
-    }
-    if condition_terms:
-        base["condition"] = condition_terms[0]
-    elif primary:
-        base["condition"] = _as_term(primary)
-    return base
+def _query_key(query: dict[str, Any]) -> str:
+    return json.dumps(query, sort_keys=True)
 
 
-def _build_fallback_query(
-    normalized: dict[str, Any],
-    profile: dict[str, Any],
-    primary: str | None,
-    statuses: list[str],
-) -> dict[str, Any] | None:
-    terms = _condition_variants(normalized, profile)
-    conds = profile.get("conditions", [])
-    if len(terms) > 1:
-        return {"condition": terms[1], "status": statuses}
-    if len(conds) > 1:
-        return {"condition": _as_term(conds[1]), "status": statuses}
-    if primary:
-        return {
-            "condition": _as_term(primary),
-            "status": ["RECRUITING", "NOT_YET_RECRUITING", "ACTIVE_NOT_RECRUITING"],
-        }
-    return None
+def _dedupe_queries(queries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    out: list[dict[str, Any]] = []
+
+    for query in queries:
+        cleaned = {k: v for k, v in query.items() if v not in (None, "", [])}
+        key = _query_key(cleaned)
+        if cleaned and key not in seen:
+            seen.add(key)
+            out.append(cleaned)
+
+    return out
 
 
 def build_search_queries(
@@ -143,12 +149,58 @@ def build_search_queries(
     patient_profile: dict[str, Any],
     include_not_yet_recruiting: bool = False,
 ) -> list[dict[str, Any]]:
-    """Build focused retrieval queries using condition + intervention + biomarker signals."""
+    """Build broad retrieval queries.
+
+    Design rule:
+    - Conditions and biomarkers belong in retrieval.
+    - Current medications, borderline labs, allergies, and contraindications belong in eligibility.
+    - Do not over-constrain the first query.
+    """
+
     statuses = _resolve_status(include_not_yet_recruiting)
-    primary = _primary_condition(normalized_terms, patient_profile)
-    candidates = [
-        _build_primary_query(normalized_terms, patient_profile, primary, statuses),
-        _build_intervention_query(normalized_terms, patient_profile, primary, statuses),
-        _build_fallback_query(normalized_terms, patient_profile, primary, statuses),
-    ]
-    return [q for q in candidates if q is not None][:3]
+
+    conditions = _collect_condition_terms(normalized_terms, patient_profile)
+    biomarkers = _collect_biomarker_terms(patient_profile)
+    preferences = _collect_preference_terms(patient_profile)
+
+    queries: list[dict[str, Any]] = []
+
+    # 1. Broad disease-only queries. These are the most important.
+    for condition in conditions[:3]:
+        queries.append(
+            {
+                "condition": condition,
+                "status": statuses,
+            }
+        )
+
+    # 2. Disease + actionable biomarker free-text queries.
+    for condition in conditions[:2]:
+        for marker in biomarkers[:4]:
+            queries.append(
+                {
+                    "term": f"{condition} {marker}",
+                    "status": statuses,
+                }
+            )
+
+    # 3. Disease + trial preference queries.
+    for condition in conditions[:2]:
+        for preference in preferences[:3]:
+            queries.append(
+                {
+                    "term": f"{condition} {preference}",
+                    "status": statuses,
+                }
+            )
+
+    # 4. Last-resort biomarker-only search.
+    for marker in biomarkers[:2]:
+        queries.append(
+            {
+                "term": marker,
+                "status": statuses,
+            }
+        )
+
+    return _dedupe_queries(queries)[:10]

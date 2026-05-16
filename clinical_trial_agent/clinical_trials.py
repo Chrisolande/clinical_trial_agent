@@ -44,6 +44,7 @@ class ToolError(BaseModel):
 class SearchTrialsInput(BaseModel):
     condition: str | None = None
     intervention: str | None = None
+    term: str | None = None
     status: list[str] | None = None
     page_size: int = Field(default=20, ge=1, le=1000)
 
@@ -216,6 +217,7 @@ async def _request_json_with_retry(url: str, params: dict[str, Any]) -> dict[str
 async def search_trials(
     condition: str | None = None,
     intervention: str | None = None,
+    term: str | None = None,
     status: list[str] | None = None,
     page_size: int = 20,
 ) -> dict[str, Any]:
@@ -223,14 +225,19 @@ async def search_trials(
     validated = SearchTrialsInput(
         condition=condition,
         intervention=intervention,
+        term=term,
         status=status,
         page_size=page_size,
     )
+
     params: dict[str, Any] = {"format": "json", "pageSize": validated.page_size}
+
     if validated.condition:
         params["query.cond"] = validated.condition
     if validated.intervention:
         params["query.intr"] = validated.intervention
+    if validated.term:
+        params["query.term"] = validated.term
     if validated.status:
         params["filter.overallStatus"] = "|".join(validated.status)
 

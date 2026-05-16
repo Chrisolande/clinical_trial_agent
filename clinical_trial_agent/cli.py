@@ -1,3 +1,5 @@
+import warnings
+
 import hashlib
 import hmac
 import json
@@ -37,7 +39,7 @@ from clinical_trial_agent.clinical_trials import search_trials
 from clinical_trial_agent.config import get_settings
 from clinical_trial_agent.logging_config import configure_logging
 from clinical_trial_agent.validate_env import validate_or_raise_async
-
+warnings.filterwarnings("ignore", category=SyntaxWarning)
 app = AsyncTyper(help="Clinical Trial Agent CLI")
 memory_app = AsyncTyper(help="Episodic memory operations")
 app.add_typer(memory_app, name="memory")

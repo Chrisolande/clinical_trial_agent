@@ -180,6 +180,7 @@ async def _run_search_queries(
         search_trials(
             condition=query.get("condition"),
             intervention=query.get("intervention"),
+            term=query.get("term"),
             status=query.get("status"),
             page_size=page_size,
         )

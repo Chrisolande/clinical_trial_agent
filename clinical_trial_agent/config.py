@@ -12,7 +12,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from tools.llm_factory import build_llm_client, is_local_provider
 
 _ = load_dotenv()
-_DEFAULT_DB_URI: Final[str] = "postgresql://postgres:postgres@localhost:5432/postgres"
+_DEFAULT_DB_URI: Final[str] = "postgresql://postgres:postgres@localhost:5433/postgres"
 TIER_ORDER: Final[dict[str, int]] = {
     "disqualified": 0,
     "weak": 1,
@@ -98,16 +98,16 @@ class Settings(BaseSettings):
     supervisor_use_react: bool = False
     supervisor_agent_timeout_seconds: float = 45.0
     llm_call_timeout_seconds: float = 60.0
-    retrieval_internal_max_retries: int = 0
+    retrieval_internal_max_retries: int = 2
     max_trials_for_eligibility: int | None = None
-    one_pass_mode: bool = True
+    one_pass_mode: bool = False
 
     tavily_api_key: SecretStr = Field(default=SecretStr(""), repr=False)
     tavily_max_results: int = 3
     tavily_max_trials_to_enrich: int = 8
     tavily_enable_ctgov_supplement: bool = True
 
-    max_retry_attempts: int = 1
+    max_retry_attempts: int = 2
 
     @field_validator("llm_provider", mode="before")
     @classmethod
