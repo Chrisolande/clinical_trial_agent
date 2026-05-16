@@ -20,7 +20,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  QUALITY_COVERAGE_MIN: "65"
+  QUALITY_COVERAGE_MIN: "75"
 
 jobs:
   lint:
