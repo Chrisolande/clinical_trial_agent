@@ -12,6 +12,7 @@ from langchain_core.prompts import (
 from loguru import logger
 from models.missing_info import CompletenessAssessmentList
 from prompts.missinginfo import build_missing_info_human_prompt, build_missing_info_system_prompt
+from pydantic import BaseModel, Field
 
 from agents.consent import assert_external_llm_consent
 from agents.missing_info_catalog import (
@@ -27,6 +28,11 @@ _PROMPT: ChatPromptTemplate = ChatPromptTemplate.from_messages(
         HumanMessagePromptTemplate.from_template(build_missing_info_human_prompt()),
     ]
 )
+
+
+class MissingInfoPromptInput(BaseModel):
+    patient_profile: str = Field(min_length=1)
+    trial_verdicts: str = Field(min_length=1)
 
 
 def _get_chain() -> Any:
@@ -95,10 +101,14 @@ async def _invoke_missing_info_llm(
     uncertain_summary: str,
 ) -> CompletenessAssessmentList:
     assert_external_llm_consent()
+    prompt_input = MissingInfoPromptInput(
+        patient_profile=_format_profile_summary(patient_profile).strip(),
+        trial_verdicts=uncertain_summary.strip(),
+    )
     result = await _get_chain().ainvoke(
         {
-            "patient_profile": _format_profile_summary(patient_profile),
-            "trial_verdicts": uncertain_summary,
+            "patient_profile": prompt_input.patient_profile,
+            "trial_verdicts": prompt_input.trial_verdicts,
         },
         config={
             "run_name": "missing_info",

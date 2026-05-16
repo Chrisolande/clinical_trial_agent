@@ -6,6 +6,7 @@ from typing import Any
 from langchain.agents import create_agent
 from langchain_core.runnables import RunnableConfig
 from loguru import logger
+from prompts.supervisor import build_supervisor_prompt
 from subagents.eligibility.graph import compiled_eligibility_graph
 from subagents.retrieval.graph import compiled_retrieval_graph
 from subagents.synthesis.graph import compiled_synthesis_graph
@@ -49,7 +50,7 @@ class SupervisorOrchestrator:
                 model=self._get_llm(),
                 tools=[self.run_retrieval, self.run_eligibility, self.run_synthesis],
                 name="clinical_supervisor",
-                system_prompt="Use tools in order: run_retrieval -> run_eligibility -> run_synthesis.",
+                system_prompt=build_supervisor_prompt(),
                 checkpointer=checkpointer,
             )
 

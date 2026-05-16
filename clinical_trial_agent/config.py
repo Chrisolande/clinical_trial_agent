@@ -102,11 +102,6 @@ class Settings(BaseSettings):
     max_trials_for_eligibility: int | None = None
     one_pass_mode: bool = False
 
-    tavily_api_key: SecretStr = Field(default=SecretStr(""), repr=False)
-    tavily_max_results: int = 3
-    tavily_max_trials_to_enrich: int = 8
-    tavily_enable_ctgov_supplement: bool = True
-
     max_retry_attempts: int = 2
 
     @field_validator("llm_provider", mode="before")

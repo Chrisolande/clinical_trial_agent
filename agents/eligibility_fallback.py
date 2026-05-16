@@ -143,15 +143,15 @@ def fallback_verdict_for_exception(
         logger.warning("Eligibility assessment timed out for {} ({})", trial_id, type(exc).__name__)
         return deterministic_timeout_verdict(patient_profile, all_criteria, trial_id)
 
-    logger.opt(exception=False).error(
-        "Eligibility assessment failed for {} ({}): {}",
-        trial_id,
-        type(exc).__name__,
-        exc,
-    )
     # Distinguish parsing failures from other generic errors so tests and logs remain clear
     msg = str(exc)
     if "LLM parsing failed" in msg or "parsing failed" in msg or "parsing" in msg.lower():
+        logger.opt(exception=False).warning(
+            "Eligibility assessment parsing failed for {} ({}): {}",
+            trial_id,
+            type(exc).__name__,
+            exc,
+        )
         return validate_verdict(
             _make_fallback(
                 "LLM response parsing failed",
@@ -160,6 +160,12 @@ def fallback_verdict_for_exception(
             ),
             trial_id,
         )
+    logger.opt(exception=False).error(
+        "Eligibility assessment failed for {} ({}): {}",
+        trial_id,
+        type(exc).__name__,
+        exc,
+    )
     return validate_verdict(
         _make_fallback(
             "Eligibility judge error",

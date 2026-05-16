@@ -22,7 +22,7 @@ RULES
 - Be deterministic and conservative.
 
 OUTPUT
-- Return schema-compliant structured data only.
+- Respond with structured fields conforming to the downstream ExtractedPatientProfile Pydantic model.
 - No markdown. No commentary. No extra keys.
 
 INPUT

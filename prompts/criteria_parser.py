@@ -23,7 +23,7 @@ RULES
 - Return one criterion object per clinical requirement.
 
 OUTPUT
-- Return schema-compliant structured data only.
+- Respond with structured fields conforming to the downstream ParsedEligibilityCriterion Pydantic model.
 - No markdown. No commentary. No extra keys.
 
 INPUT

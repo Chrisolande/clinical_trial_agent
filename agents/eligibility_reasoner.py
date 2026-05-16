@@ -2,6 +2,7 @@ import json
 import os
 from typing import Any
 
+from langchain_core.utils.json import parse_json_markdown
 from loguru import logger
 from models.judge_verdict import JudgeVerdict
 from tools.retry import llm_retry
@@ -10,6 +11,62 @@ from clinical_trial_agent.config import TIER_ORDER, get_llm
 
 from .eligibility_fallback import fallback_verdict_for_exception, validate_verdict
 from .eligibility_prompt_builder import build_judge_messages
+
+
+def _extract_json_dict_from_text(text: str) -> dict[str, Any] | None:
+    cleaned = str(text or "").strip()
+    if not cleaned:
+        return None
+
+    try:
+        parsed = json.loads(cleaned)
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        pass
+
+    try:
+        parsed = parse_json_markdown(cleaned)
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        pass
+
+    start = cleaned.find("{")
+    if start == -1:
+        return None
+
+    depth = 0
+    in_string = False
+    escape = False
+    end: int | None = None
+    for idx, ch in enumerate(cleaned[start:], start=start):
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                end = idx
+                break
+
+    if end is None:
+        return None
+
+    candidate = cleaned[start : end + 1].strip()
+    try:
+        parsed = json.loads(candidate)
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        return None
 
 
 @llm_retry
@@ -53,32 +110,9 @@ async def _judge_trial(
     if isinstance(content, dict):
         return validate_verdict(content, trial_id)
     if isinstance(content, str):
-        import re
-
-        cleaned = content.strip()
-        if cleaned.startswith("```"):
-            cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
-            cleaned = re.sub(r"\s*```$", "", cleaned)
-        cleaned = cleaned.strip()
-        try:
-            parsed = json.loads(cleaned)
-            if isinstance(parsed, dict):
-                # Raw string responses (even valid JSON) should be treated as unstructured
-                # to avoid accepting high-trust outputs from non-structured providers.
-                return fallback_verdict_for_exception(
-                    Exception("LLM parsing failed"), trial_id, patient_profile, criteria
-                )
-        except (json.JSONDecodeError, TypeError, ValueError):
-            # One more attempt to extract json block
-            start = cleaned.find("{")
-            end = cleaned.rfind("}")
-            if start != -1 and end != -1 and end > start:
-                try:
-                    parsed = json.loads(cleaned[start : end + 1])
-                    if isinstance(parsed, dict):
-                        return validate_verdict(parsed, trial_id)
-                except Exception:
-                    pass
+        parsed = _extract_json_dict_from_text(content)
+        if isinstance(parsed, dict):
+            return validate_verdict(parsed, trial_id)
 
     logger.warning(
         "Eligibility judge raw fallback failed to parse for {}. Content: {}",

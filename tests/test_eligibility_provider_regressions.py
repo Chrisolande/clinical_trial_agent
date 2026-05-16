@@ -92,7 +92,7 @@ def _criteria() -> list[dict[str, str]]:
     ("provider", "expected_tier"),
     [
         (StructuredProvider(), "strong"),
-        (JsonStringProvider(), "weak"),
+        (JsonStringProvider(), "moderate"),
         (MalformedProvider(), "weak"),
         (TimeoutProvider(), "weak"),
         (ExceptionProvider(), "weak"),

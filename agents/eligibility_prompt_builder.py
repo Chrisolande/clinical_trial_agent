@@ -3,6 +3,7 @@ from typing import Any
 from langchain_core.messages import BaseMessage
 from langchain_core.prompts import ChatPromptTemplate
 from prompts.eligibility import build_eligibility_prompt
+from pydantic import BaseModel, Field
 from tools.sanitizer import sanitize_patient_profile
 
 from clinical_trial_agent.config import (
@@ -39,6 +40,11 @@ CLINICALLY_NECESSARY_FIELDS = {
     "smoking_status",
     "bmi",
 }
+
+
+class EligibilityPromptInput(BaseModel):
+    patient_summary: str = Field(min_length=1)
+    trial_summary: str = Field(min_length=1)
 
 
 def _assert_privacy_mode_allows_prompt() -> None:
@@ -121,9 +127,13 @@ def build_judge_messages(
     profile: dict[str, Any], trial: dict[str, Any], criteria: list[dict[str, Any]]
 ) -> list[BaseMessage]:
     _assert_privacy_mode_allows_prompt()
+    prompt_input = EligibilityPromptInput(
+        patient_summary=format_patient_summary(profile).strip(),
+        trial_summary=format_trial_summary(trial, criteria).strip(),
+    )
     prompt = ChatPromptTemplate.from_template(build_eligibility_prompt())
     messages = prompt.format_messages(
-        patient_summary=format_patient_summary(profile),
-        trial_summary=format_trial_summary(trial, criteria),
+        patient_summary=prompt_input.patient_summary,
+        trial_summary=prompt_input.trial_summary,
     )
     return [message for message in messages if isinstance(message, BaseMessage)]

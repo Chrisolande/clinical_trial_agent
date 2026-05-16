@@ -1,9 +1,8 @@
-import warnings
-
 import hashlib
 import hmac
 import json
 import os
+import warnings
 from pathlib import Path
 from typing import Literal
 
@@ -39,6 +38,7 @@ from clinical_trial_agent.clinical_trials import search_trials
 from clinical_trial_agent.config import get_settings
 from clinical_trial_agent.logging_config import configure_logging
 from clinical_trial_agent.validate_env import validate_or_raise_async
+
 warnings.filterwarnings("ignore", category=SyntaxWarning)
 app = AsyncTyper(help="Clinical Trial Agent CLI")
 memory_app = AsyncTyper(help="Episodic memory operations")
@@ -127,7 +127,17 @@ async def run(
 
 @app.async_command("search", help="Search ClinicalTrials.gov and display trials in a rich table.")
 async def search(
-    condition: str | None = None, intervention: str | None = None, page_size: int = 10
+    condition: str | None = typer.Option(None, "--condition", help="Condition/disease query"),
+    intervention: str | None = typer.Option(None, "--intervention", help="Intervention query"),
+    term: str | None = typer.Option(
+        None, "--term", help="Free-text ClinicalTrials.gov query.term search"
+    ),
+    status: list[str] | None = typer.Option(
+        None,
+        "--status",
+        help="ClinicalTrials.gov overall status filter. Can be repeated.",
+    ),
+    page_size: int = typer.Option(10, "--page-size", min=1, max=1000),
 ) -> None:
     try:
         await _ensure_proxy()
@@ -136,7 +146,11 @@ async def search(
         ) as progress:
             progress.add_task("Searching ClinicalTrials.gov...", total=None)
             result = await search_trials(
-                condition=condition, intervention=intervention, page_size=page_size
+                condition=condition,
+                intervention=intervention,
+                term=term,
+                status=status,
+                page_size=page_size,
             )
         studies = result.get("studies", [])
         error = result.get("error")
@@ -243,13 +257,6 @@ async def validate_env() -> None:
         )
         table.add_row("MAX_TRIALS_FOR_ELIGIBILITY", str(get_settings().max_trials_for_eligibility))
         table.add_row("MAX_TRIALS_PER_QUERY", str(get_settings().max_trials_per_query))
-        table.add_row(
-            "TAVILY_ENABLE_CTGOV_SUPPLEMENT", str(get_settings().tavily_enable_ctgov_supplement)
-        )
-        table.add_row("TAVILY_MAX_RESULTS", str(get_settings().tavily_max_results))
-        table.add_row(
-            "TAVILY_MAX_TRIALS_TO_ENRICH", str(get_settings().tavily_max_trials_to_enrich)
-        )
         console.print(table)
     except HANDLED_EXCEPTIONS as exc:
         console.print(f"[red]{exc}[/red]")

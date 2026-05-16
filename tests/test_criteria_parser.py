@@ -42,18 +42,17 @@ async def test_parse_eligibility_criteria_uses_cache_hit(monkeypatch: pytest.Mon
     assert result["inclusion_criteria"][0]["text"] == "cached"
 
 
-def test_strip_json_fences_removes_code_block() -> None:
+def test_extract_json_dict_parses_fenced_json() -> None:
     text = """```json
     {"inclusion_criteria": [], "exclusion_criteria": []}
     ```"""
-    cleaned = criteria_parser._strip_json_fences(text)
-    assert cleaned.startswith("{")
-    assert cleaned.endswith("}")
+    parsed = criteria_parser._extract_json_dict_from_text(text)
+    assert parsed == {"inclusion_criteria": [], "exclusion_criteria": []}
 
 
-def test_extract_json_object_parses_wrapped() -> None:
+def test_extract_json_dict_parses_wrapped_json() -> None:
     text = 'LLM output: {"inclusion_criteria": [], "exclusion_criteria": []}'
-    parsed = criteria_parser._extract_json_object(text)
+    parsed = criteria_parser._extract_json_dict_from_text(text)
     assert parsed == {"inclusion_criteria": [], "exclusion_criteria": []}
 
 
@@ -67,12 +66,12 @@ async def test_parse_eligibility_criteria_empty_llm_result_falls_back(
         lambda: SimpleNamespace(use_cache=False, criteria_text_max_chars=8000),
     )
     monkeypatch.setattr(criteria_parser, "_get_structured_chain", lambda: object())
-    monkeypatch.setattr(criteria_parser, "_get_json_chain", lambda: object())
+    monkeypatch.setattr(criteria_parser, "_get_unstructured_chain", lambda: object())
 
     async def fake_structured(_chain, _inputs):
         return ParsedEligibilityCriterion(inclusion_criteria=[], exclusion_criteria=[])
 
-    async def fake_json(_chain, _inputs):
+    async def fake_unstructured(_chain, _inputs):
         return ParsedEligibilityCriterion(
             inclusion_criteria=[
                 {"text": "Age >= 18 years", "is_hard_exclusion": False, "category": "age"}
@@ -81,7 +80,7 @@ async def test_parse_eligibility_criteria_empty_llm_result_falls_back(
         )
 
     monkeypatch.setattr(criteria_parser, "_invoke_structured_criteria_llm", fake_structured)
-    monkeypatch.setattr(criteria_parser, "_invoke_json_criteria_llm", fake_json)
+    monkeypatch.setattr(criteria_parser, "_invoke_unstructured_criteria_llm", fake_unstructured)
 
     result = await criteria_parser.parse_eligibility_criteria(
         "Inclusion Criteria:\nAge >= 18 years\nExclusion Criteria:\nprior therapy",
@@ -101,12 +100,12 @@ async def test_parse_eligibility_criteria_exception_falls_back(
         lambda: SimpleNamespace(use_cache=False, criteria_text_max_chars=8000),
     )
     monkeypatch.setattr(criteria_parser, "_get_structured_chain", lambda: object())
-    monkeypatch.setattr(criteria_parser, "_get_json_chain", lambda: object())
+    monkeypatch.setattr(criteria_parser, "_get_unstructured_chain", lambda: object())
 
     async def raise_structured(_chain, _inputs):
         raise RuntimeError("boom")
 
-    async def fake_json(_chain, _inputs):
+    async def fake_unstructured(_chain, _inputs):
         return ParsedEligibilityCriterion(
             inclusion_criteria=[
                 {"text": "Age >= 18 years", "is_hard_exclusion": False, "category": "age"}
@@ -115,7 +114,7 @@ async def test_parse_eligibility_criteria_exception_falls_back(
         )
 
     monkeypatch.setattr(criteria_parser, "_invoke_structured_criteria_llm", raise_structured)
-    monkeypatch.setattr(criteria_parser, "_invoke_json_criteria_llm", fake_json)
+    monkeypatch.setattr(criteria_parser, "_invoke_unstructured_criteria_llm", fake_unstructured)
 
     result = await criteria_parser.parse_eligibility_criteria(
         "Inclusion Criteria:\nAge >= 18 years\nExclusion Criteria:\nprior therapy",

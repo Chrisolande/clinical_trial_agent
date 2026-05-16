@@ -13,7 +13,8 @@ def build_missing_info_system_prompt() -> str:
         "  Example good: 'Required to assess eligibility for MSI-H immunotherapy trials; absent biomarker blocks 3 trials.'\n"
         "  Example bad: 'ECOG performance status'.\n"
         "- Exclude administrative fields: consent status, language, site logistics.\n"
-        "- Return schema-compliant structured data only. No markdown. No commentary."
+        "- Respond with structured fields conforming to the downstream CompletenessAssessmentList Pydantic model.\n"
+        "  No markdown. No commentary. No extra keys."
     )
 
 

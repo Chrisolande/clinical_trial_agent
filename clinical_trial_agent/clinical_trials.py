@@ -123,7 +123,9 @@ async def _try_urllib_fallback_on_403(url: str, params: dict[str, Any]) -> dict[
     if _contains_phi_params(params):
         return None
     try:
-        payload = await asyncio.to_thread(_urllib_get_json, url, params, 30.0)
+        # Best-effort: urllib is blocking, but this branch is rare (only after a 403).
+        # Keeping it synchronous avoids leaving background threadpool workers around.
+        payload = _urllib_get_json(url, params, 30.0)
     except Exception as exc:
         logger.warning("CT.gov urllib fallback failed after 403: {}", exc)
         return None

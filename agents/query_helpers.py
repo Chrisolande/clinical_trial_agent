@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from typing import Any
 
-
 DEFAULT_STATUSES = ["RECRUITING"]
 BROAD_STATUSES = ["RECRUITING", "NOT_YET_RECRUITING", "ACTIVE_NOT_RECRUITING"]
 
@@ -54,9 +53,7 @@ def _looks_searchable_condition(term: str) -> bool:
         return False
     if "no known" in lowered or "not pregnant" in lowered:
         return False
-    if len(lowered) > 140:
-        return False
-    return True
+    return not len(lowered) > 140
 
 
 def _collect_condition_terms(
@@ -126,6 +123,31 @@ def _collect_preference_terms(profile: dict[str, Any]) -> list[str]:
     return _dedupe(terms)
 
 
+def _collect_intervention_terms(
+    normalized: dict[str, Any],
+    profile: dict[str, Any],
+) -> list[str]:
+    terms: list[str] = []
+
+    for value in normalized.get("intervention_search_terms", []):
+        term = _as_term(value)
+        if term:
+            terms.append(term)
+
+    # Support simple medication lists (strings) and objects with name/generic_name.
+    for med in profile.get("medications", []):
+        if isinstance(med, dict):
+            name = _as_term(med.get("generic_name") or med.get("name"))
+            if name:
+                terms.append(name)
+        else:
+            term = _as_term(med)
+            if term:
+                terms.append(term)
+
+    return _dedupe(terms)
+
+
 def _query_key(query: dict[str, Any]) -> str:
     return json.dumps(query, sort_keys=True)
 
@@ -162,10 +184,22 @@ def build_search_queries(
     conditions = _collect_condition_terms(normalized_terms, patient_profile)
     biomarkers = _collect_biomarker_terms(patient_profile)
     preferences = _collect_preference_terms(patient_profile)
+    interventions = _collect_intervention_terms(normalized_terms, patient_profile)
 
     queries: list[dict[str, Any]] = []
 
-    # 1. Broad disease-only queries. These are the most important.
+    # 1. Broad disease query, optionally with a single primary intervention term.
+    primary_intervention = interventions[0] if interventions else None
+    for condition in conditions[:3]:
+        queries.append(
+            {
+                "condition": condition,
+                "intervention": primary_intervention,
+                "status": statuses,
+            }
+        )
+
+    # 2. Disease-only queries (fallback if intervention is missing or over-constrains results).
     for condition in conditions[:3]:
         queries.append(
             {
@@ -174,7 +208,7 @@ def build_search_queries(
             }
         )
 
-    # 2. Disease + actionable biomarker free-text queries.
+    # 3. Disease + actionable biomarker free-text queries.
     for condition in conditions[:2]:
         for marker in biomarkers[:4]:
             queries.append(
@@ -184,7 +218,7 @@ def build_search_queries(
                 }
             )
 
-    # 3. Disease + trial preference queries.
+    # 4. Disease + trial preference queries.
     for condition in conditions[:2]:
         for preference in preferences[:3]:
             queries.append(
@@ -194,7 +228,7 @@ def build_search_queries(
                 }
             )
 
-    # 4. Last-resort biomarker-only search.
+    # 5. Last-resort biomarker-only search.
     for marker in biomarkers[:2]:
         queries.append(
             {

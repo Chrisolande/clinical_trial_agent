@@ -46,9 +46,9 @@ ADDITIONAL CONSTRAINTS
 - Be conservative, but avoid "underpromotion" where a clear fit is downgraded to weak.
 
 OUTPUT
-- Return valid JSON only. No prose. No markdown.
+- Respond with structured fields conforming to the downstream JudgeVerdict Pydantic model.
+- No prose-only responses. No markdown.
 - Do not include derived/internal fields (for example: is_hard_exclusion).
-- Output must conform to the downstream JudgeVerdict Pydantic model.
 - Use clinician-facing language in "rationale" and "key_concern".
 - DO NOT use technical terms like "LLM", "model", "tier assignment", "evidence floor", "parser", "scoring", "algorithm", or "fallback" in public-facing strings.
 - Instead of "tier assignment", use "eligibility category" or "match strength".

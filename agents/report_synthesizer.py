@@ -8,9 +8,21 @@ from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
 from models.report import ReportPlan
 from prompts.synthesis import build_synthesis_prompt
+from pydantic import BaseModel, Field
 from tools.retry import llm_retry
 
 from clinical_trial_agent.config import get_llm, get_settings
+
+
+class SynthesisPromptInput(BaseModel):
+    patient_profile: str = Field(min_length=1)
+    patient_summary: str = Field(min_length=1)
+    scored_trials: str = Field(min_length=1)
+    eligibility_verdicts: str = Field(min_length=1)
+    key_concerns: str = Field(min_length=1)
+    critical_missing_info: str = Field(min_length=1)
+    missing_info: str = Field(min_length=1)
+    qa_issues: str = Field(min_length=1)
 
 
 def _enforce_conservative_wording(summary: str, critical_missing_count: int) -> str:
@@ -188,15 +200,25 @@ async def generate_report_plan(
         }
         for trial in scored_trials
     ]
+    prompt_input = SynthesisPromptInput(
+        patient_profile=_serialize(patient_profile),
+        patient_summary=_describe_patient(patient_profile),
+        scored_trials=_serialize(scored_trials),
+        eligibility_verdicts=_serialize(eligibility_verdicts),
+        key_concerns=_serialize(key_concerns),
+        critical_missing_info=_serialize(critical_missing_info),
+        missing_info=_serialize(missing_info),
+        qa_issues=_serialize(qa_issues),
+    )
     context = {
-        "patient_profile": _serialize(patient_profile),
-        "patient_summary": _describe_patient(patient_profile),
-        "scored_trials": _serialize(scored_trials),
-        "eligibility_verdicts": _serialize(eligibility_verdicts),
-        "key_concerns": _serialize(key_concerns),
-        "critical_missing_info": _serialize(critical_missing_info),
-        "missing_info": _serialize(missing_info),
-        "qa_issues": _serialize(qa_issues),
+        "patient_profile": prompt_input.patient_profile,
+        "patient_summary": prompt_input.patient_summary,
+        "scored_trials": prompt_input.scored_trials,
+        "eligibility_verdicts": prompt_input.eligibility_verdicts,
+        "key_concerns": prompt_input.key_concerns,
+        "critical_missing_info": prompt_input.critical_missing_info,
+        "missing_info": prompt_input.missing_info,
+        "qa_issues": prompt_input.qa_issues,
     }
     prompt = ChatPromptTemplate.from_template(build_synthesis_prompt())
     chain = prompt | get_llm().with_structured_output(ReportPlan)

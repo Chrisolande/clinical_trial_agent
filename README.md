@@ -108,7 +108,6 @@ Optional retrieval settings:
 
 ```bash
 CTGOV_PROXY_URL=http://localhost:8000/ctgov/search
-TAVILY_ENABLE_CTGOV_SUPPLEMENT=false
 ```
 
 > [!IMPORTANT]
@@ -137,7 +136,6 @@ export PROFILE_HASH_SALT=local-dev-salt
 export DB_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
 export TENANT_ID=local-tenant
 export FACILITY_ID=local-facility
-export TAVILY_ENABLE_CTGOV_SUPPLEMENT=false
 
 export LLM_PROVIDER=deepseek
 export DEEPSEEK_API_KEY=your-deepseek-key

@@ -36,23 +36,14 @@ RULES
 9. Merge duplicate gaps across trials.
 10. Rank gaps by decision impact, not by quantity.
 11. Keep executive summary concise, comparative, and clinically useful.
-12. Output structured data only matching ReportPlan.
+12. Respond with structured fields conforming to the downstream ReportPlan Pydantic model.
 
 TIER DEFINITIONS
 - strong, moderate, weak, disqualified are the only allowed tiers.
 
 OUTPUT
-Return structured data matching ReportPlan exactly:
-- patient_summary
-- executive_summary
-- bottom_line
-- strong_matches
-- moderate_matches
-- information_gaps
-- recommended_actions
-- excluded_summary
-- limitations
-No markdown. No prose wrapper. No extra keys.
+- Respond with structured fields conforming to the downstream ReportPlan Pydantic model.
+- No markdown. No prose wrapper. No extra keys.
 
 INPUT
 Patient profile: {patient_profile}

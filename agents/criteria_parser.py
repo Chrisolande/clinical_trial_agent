@@ -1,13 +1,14 @@
 import asyncio
 import json
-import re
 from typing import Any, Literal, cast
 
 from langchain_core.messages import BaseMessage
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.utils.json import parse_json_markdown
 from loguru import logger
 from models.criteria import ParsedEligibilityCriterion
 from prompts.criteria_parser import build_criteria_parser_prompt
+from pydantic import BaseModel, Field
 from tools import cache
 from tools.retry import llm_retry
 
@@ -20,59 +21,14 @@ CriterionCategoryLiteral = Literal[
 _PROMPT: ChatPromptTemplate = ChatPromptTemplate.from_template(build_criteria_parser_prompt())
 
 
-_JSON_REPAIR_PROMPT = ChatPromptTemplate.from_template(
-    """
-You are parsing clinical trial eligibility criteria.
-
-Return ONLY valid JSON. Do not return markdown. Do not explain.
-
-The JSON must match this schema exactly:
-
-{{
-  "inclusion_criteria": [
-    {{
-      "text": "criterion text",
-      "criterion_type": "inclusion",
-      "is_hard_exclusion": false,
-      "category": "age | lab | biomarker | diagnosis | medication | performance | other"
-    }}
-  ],
-  "exclusion_criteria": [
-    {{
-      "text": "criterion text",
-      "criterion_type": "exclusion",
-      "is_hard_exclusion": true,
-      "category": "age | lab | biomarker | diagnosis | medication | performance | other"
-    }}
-  ]
-}}
-
-Rules:
-- Preserve the original medical meaning.
-- Do not invent criteria.
-- Split compound criteria only when clearly separable.
-- Inclusion criteria must go under inclusion_criteria.
-- Exclusion criteria must go under exclusion_criteria.
-- If a section is absent, return an empty list for that section.
-- Categories must be one of: age, lab, biomarker, diagnosis, medication, performance, other.
-
-NCT ID:
-{nct_id}
-
-Eligibility criteria:
-{eligibility_criteria_raw}
-""".strip()
-)
-
-
 def _get_structured_chain() -> Any:
     """Build a fresh parser chain per call to avoid stale loop-bound transports."""
     return _PROMPT | get_llm().with_structured_output(ParsedEligibilityCriterion)
 
 
-def _get_json_chain() -> Any:
-    """Fallback LLM parser that asks for raw JSON instead of tool/structured output."""
-    return _JSON_REPAIR_PROMPT | get_llm()
+def _get_unstructured_chain() -> Any:
+    """Fallback LLM parser without structured output; parsed into the same Pydantic model."""
+    return _PROMPT | get_llm()
 
 
 def _extract_text_from_message(result: Any) -> str:
@@ -99,34 +55,73 @@ def _extract_text_from_message(result: Any) -> str:
     return str(result)
 
 
-def _strip_json_fences(text: str) -> str:
-    cleaned = text.strip()
-
-    if cleaned.startswith("```"):
-        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
-        cleaned = re.sub(r"\s*```$", "", cleaned)
-
-    return cleaned.strip()
+def _extract_json_object_or_raise(text: str) -> dict[str, Any]:
+    parsed = _extract_json_dict_from_text(text)
+    if isinstance(parsed, dict):
+        return parsed
+    cleaned = str(text or "").strip()
+    raise ValueError(f"No JSON object found in LLM output: {cleaned[:500]}") from None
 
 
-def _extract_json_object(text: str) -> dict[str, Any]:
-    cleaned = _strip_json_fences(text)
+def _extract_json_dict_from_text(text: str) -> dict[str, Any] | None:
+    cleaned = str(text or "").strip()
+    if not cleaned:
+        return None
 
     try:
         parsed = json.loads(cleaned)
-    except json.JSONDecodeError:
-        start = cleaned.find("{")
-        end = cleaned.rfind("}")
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        pass
 
-        if start == -1 or end == -1 or end <= start:
-            raise ValueError(f"No JSON object found in LLM output: {cleaned[:500]}") from None
+    try:
+        parsed = parse_json_markdown(cleaned)
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        pass
 
-        parsed = json.loads(cleaned[start : end + 1])
+    start = cleaned.find("{")
+    if start == -1:
+        return None
 
-    if not isinstance(parsed, dict):
-        raise TypeError(f"Expected JSON object, got {type(parsed)!r}")
+    depth = 0
+    in_string = False
+    escape = False
+    end: int | None = None
+    for idx, ch in enumerate(cleaned[start:], start=start):
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                end = idx
+                break
 
-    return parsed
+    if end is None:
+        return None
+
+    candidate = cleaned[start : end + 1].strip()
+    try:
+        parsed = json.loads(candidate)
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        return None
+
+
+class CriteriaParserPromptInput(BaseModel):
+    nct_id: str = Field(min_length=1)
+    eligibility_criteria_raw: str = Field(min_length=1)
 
 
 def _ensure_non_empty_parse(parsed: ParsedEligibilityCriterion, nct_id: str) -> None:
@@ -143,9 +138,15 @@ async def parse_eligibility_criteria(eligibility_text: str, nct_id: str) -> dict
     if not eligibility_text or len(eligibility_text.strip()) < 20:
         return {"inclusion_criteria": [], "exclusion_criteria": []}
 
+    prompt_input = CriteriaParserPromptInput(
+        nct_id=str(nct_id or "unknown").strip() or "unknown",
+        eligibility_criteria_raw=str(eligibility_text).strip(),
+    )
     cache_params = {
-        "nct_id": nct_id,
-        "eligibility_criteria_raw": eligibility_text[: get_settings().criteria_text_max_chars],
+        "nct_id": prompt_input.nct_id,
+        "eligibility_criteria_raw": prompt_input.eligibility_criteria_raw[
+            : get_settings().criteria_text_max_chars
+        ],
     }
 
     if get_settings().use_cache:
@@ -176,20 +177,21 @@ async def _parse_with_llm_or_raise(inputs: dict[str, Any]) -> ParsedEligibilityC
     except Exception as exc:
         structured_error = exc
         logger.warning(
-            "Structured criteria parse failed for {}. Retrying with raw JSON LLM parse. Error: {}",
+            "Structured criteria parse failed for {}. Retrying with unstructured LLM parse + "
+            "Pydantic validation. Error: {}",
             nct_id,
             exc,
         )
 
     try:
-        parsed = await _invoke_json_criteria_llm(_get_json_chain(), inputs)
+        parsed = await _invoke_unstructured_criteria_llm(_get_unstructured_chain(), inputs)
         _ensure_non_empty_parse(parsed, nct_id)
         return parsed
     except Exception as json_exc:
         raise RuntimeError(
             f"Criteria parsing failed for {nct_id}. "
             f"Structured parse error: {structured_error}. "
-            f"JSON parse error: {json_exc}. "
+            f"Unstructured parse error: {json_exc}. "
             "No deterministic fallback was used."
         ) from json_exc
 
@@ -217,17 +219,23 @@ async def _invoke_structured_criteria_llm(
 
 
 @llm_retry
-async def _invoke_json_criteria_llm(
+async def _invoke_unstructured_criteria_llm(
     chain: Any,
     inputs: dict[str, Any],
 ) -> ParsedEligibilityCriterion:
     result = await chain.ainvoke(
         inputs,
-        config={"run_name": "criteria_parse_json", "tags": ["eligibility", "parse", "json"]},
+        config={
+            "run_name": "criteria_parse_unstructured",
+            "tags": ["eligibility", "parse", "unstructured"],
+        },
     )
 
     text = _extract_text_from_message(result)
-    parsed_dict = _extract_json_object(text)
+    # Some providers return a dict-like content, others return a string containing JSON.
+    if isinstance(result, dict):
+        return ParsedEligibilityCriterion.model_validate(result)
+    parsed_dict = _extract_json_object_or_raise(text)
     return ParsedEligibilityCriterion.model_validate(parsed_dict)
 
 

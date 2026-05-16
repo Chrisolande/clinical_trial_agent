@@ -117,7 +117,7 @@ async def test_unverified_partial_criteria_cannot_produce_strong_tier(
         trial={
             "nct_id": "NCTSNIPPET",
             "brief_title": "Demo Trial",
-            "criteria_source": "tavily_snippet",
+            "criteria_source": "unverified_partial_source",
             "criteria_source_verified": False,
             "criteria_completeness": "partial",
         },
@@ -131,4 +131,4 @@ async def test_unverified_partial_criteria_cannot_produce_strong_tier(
 
     assert result["match_tier"] == "moderate"
     assert result["match_score"] <= 0.65
-    assert result["criteria_source"] == "tavily_snippet"
+    assert result["criteria_source"] == "unverified_partial_source"
