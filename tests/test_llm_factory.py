@@ -4,7 +4,6 @@ import types
 from types import SimpleNamespace
 
 import pytest
-
 from tools import llm_factory
 
 

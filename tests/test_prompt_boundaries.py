@@ -17,7 +17,12 @@ def clear_settings_cache() -> None:
     get_settings.cache_clear()
 
 
-def test_eligibility_prompt_builder_returns_base_messages() -> None:
+def test_eligibility_prompt_builder_returns_base_messages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("LLM_PRIVACY_MODE", "deidentified")
+    get_settings.cache_clear()
     messages = build_judge_messages(
         profile={"age": 54, "primary_condition": "NSCLC"},
         trial={"nct_id": "NCT1", "brief_title": "Example Trial"},
@@ -27,7 +32,12 @@ def test_eligibility_prompt_builder_returns_base_messages() -> None:
     assert all(isinstance(message, BaseMessage) for message in messages)
 
 
-def test_eligibility_prompt_builder_includes_criterion_ids_when_present() -> None:
+def test_eligibility_prompt_builder_includes_criterion_ids_when_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("LLM_PRIVACY_MODE", "deidentified")
+    get_settings.cache_clear()
     messages = build_judge_messages(
         profile={"age": 54, "primary_condition": "NSCLC"},
         trial={"nct_id": "NCT1", "brief_title": "Example Trial"},
@@ -43,7 +53,12 @@ def test_eligibility_prompt_builder_includes_criterion_ids_when_present() -> Non
     assert "[inclusion NCT1_inc_0] Age >= 18" in prompt_text
 
 
-def test_eligibility_prompt_builder_rejects_empty_patient_summary() -> None:
+def test_eligibility_prompt_builder_rejects_empty_patient_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("LLM_PRIVACY_MODE", "deidentified")
+    get_settings.cache_clear()
     with pytest.raises(ValidationError):
         build_judge_messages(
             profile={},

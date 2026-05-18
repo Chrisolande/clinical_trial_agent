@@ -9,13 +9,13 @@ from typing import Any
 
 import pytest
 from cryptography.fernet import Fernet
+from tools import memory_audit_feedback, memory_helpers, memory_schema
 
 from clinical_trial_agent import memory as memory_module
-from tools import memory_audit_feedback, memory_helpers, memory_schema
 
 
 class _AsyncTx:
-    async def __aenter__(self) -> "_AsyncTx":
+    async def __aenter__(self) -> _AsyncTx:
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:  # type: ignore[no-untyped-def]
@@ -135,7 +135,9 @@ def test_memory_helpers_serialize_deserialize() -> None:
 
 
 def test_memory_helpers_get_checkpointer_paths(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(memory_helpers, "get_settings", lambda: SimpleNamespace(database_uri="db://dsn"))
+    monkeypatch.setattr(
+        memory_helpers, "get_settings", lambda: SimpleNamespace(database_uri="db://dsn")
+    )
     real_import = builtins.__import__
 
     def import_error(name, globals=None, locals=None, fromlist=(), level=0):  # type: ignore[no-untyped-def]
