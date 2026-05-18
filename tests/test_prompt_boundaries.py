@@ -27,6 +27,22 @@ def test_eligibility_prompt_builder_returns_base_messages() -> None:
     assert all(isinstance(message, BaseMessage) for message in messages)
 
 
+def test_eligibility_prompt_builder_includes_criterion_ids_when_present() -> None:
+    messages = build_judge_messages(
+        profile={"age": 54, "primary_condition": "NSCLC"},
+        trial={"nct_id": "NCT1", "brief_title": "Example Trial"},
+        criteria=[
+            {
+                "criteria_type": "inclusion",
+                "criterion_id": "NCT1_inc_0",
+                "text": "Age >= 18",
+            }
+        ],
+    )
+    prompt_text = "\n".join(str(message.content) for message in messages)
+    assert "[inclusion NCT1_inc_0] Age >= 18" in prompt_text
+
+
 def test_eligibility_prompt_builder_rejects_empty_patient_summary() -> None:
     with pytest.raises(ValidationError):
         build_judge_messages(

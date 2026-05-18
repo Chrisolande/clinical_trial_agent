@@ -131,17 +131,111 @@ async def _judge_trial(
     )
 
 
-def _build_verdict_rows(verdict: JudgeVerdict) -> list[dict[str, Any]]:
-    def rows(texts: list[str], verdict_label: str, kind: str, hard: bool) -> list[dict[str, Any]]:
-        return [
+def _normalize_criterion_text(text: str) -> str:
+    return " ".join(str(text or "").strip().lower().split())
+
+
+def _criterion_source_type(criteria_type: str) -> str:
+    return "parsed_exclusion" if criteria_type == "exclusion" else "parsed_inclusion"
+
+
+def _build_criterion_lookup(
+    criteria: list[dict[str, Any]] | None,
+) -> tuple[dict[tuple[str, str], dict[str, Any]], dict[str, dict[str, Any]]]:
+    by_type_and_text: dict[tuple[str, str], dict[str, Any]] = {}
+    by_text: dict[str, dict[str, Any]] = {}
+    for criterion in criteria or []:
+        text = str(criterion.get("text", "")).strip()
+        normalized = _normalize_criterion_text(text)
+        if not normalized:
+            continue
+        criteria_type = str(
+            criterion.get("criteria_type") or criterion.get("criterion_type") or "inclusion"
+        ).lower()
+        entry = {
+            "criterion_id": criterion.get("criterion_id"),
+            "criterion_text": text,
+            "criterion_type": criteria_type,
+            "source_type": _criterion_source_type(criteria_type),
+        }
+        by_type_and_text.setdefault((criteria_type, normalized), entry)
+        by_text.setdefault(normalized, entry)
+    return by_type_and_text, by_text
+
+
+def _evidence_metadata_for_row(
+    *,
+    text: str,
+    kind: str,
+    verdict_label: str,
+    trial_id: str,
+    lookup_by_type_and_text: dict[tuple[str, str], dict[str, Any]],
+    lookup_by_text: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    normalized = _normalize_criterion_text(text)
+    matched = lookup_by_type_and_text.get((kind, normalized)) or lookup_by_text.get(normalized)
+    if matched:
+        source_type = str(matched["source_type"])
+        criterion_id = matched.get("criterion_id")
+        criterion_text = str(matched.get("criterion_text") or text)
+        evidence_ref = {
+            "source_type": source_type,
+            "trial_id": trial_id,
+            "criterion_id": criterion_id,
+            "criterion_text": criterion_text,
+            "verdict": verdict_label,
+        }
+        return {
+            "criterion_id": criterion_id,
+            "source_type": source_type,
+            "criterion_text": criterion_text,
+            "evidence_refs": [evidence_ref],
+        }
+
+    return {
+        "criterion_id": None,
+        "source_type": "not_enough_evidence",
+        "criterion_text": text,
+        "evidence_refs": [
             {
-                "criterion_text": t,
+                "source_type": "not_enough_evidence",
+                "trial_id": trial_id,
+                "criterion_text": text,
                 "verdict": verdict_label,
-                "criterion_type": kind,
-                "is_hard_exclusion": hard,
+                "note": "No supplied parsed criterion matched this verdict text exactly.",
             }
-            for t in texts
-        ]
+        ],
+    }
+
+
+def _build_verdict_rows(
+    verdict: JudgeVerdict,
+    criteria: list[dict[str, Any]] | None = None,
+    trial_id: str = "",
+) -> list[dict[str, Any]]:
+    lookup_by_type_and_text, lookup_by_text = _build_criterion_lookup(criteria)
+
+    def rows(texts: list[str], verdict_label: str, kind: str, hard: bool) -> list[dict[str, Any]]:
+        output: list[dict[str, Any]] = []
+        for criterion_text in texts:
+            text = str(criterion_text).strip()
+            metadata = _evidence_metadata_for_row(
+                text=text,
+                kind=kind,
+                verdict_label=verdict_label,
+                trial_id=trial_id,
+                lookup_by_type_and_text=lookup_by_type_and_text,
+                lookup_by_text=lookup_by_text,
+            )
+            output.append(
+                {
+                    **metadata,
+                    "verdict": verdict_label,
+                    "criterion_type": kind,
+                    "is_hard_exclusion": hard,
+                }
+            )
+        return output
 
     return [
         *rows(verdict.inclusion_met, "MEETS", "inclusion", False),
@@ -349,5 +443,5 @@ async def evaluate_criteria_batch(
     except Exception as exc:
         verdict = fallback_verdict_for_exception(exc, trial_id, patient_profile, all_criteria)
 
-    verdicts = _build_verdict_rows(verdict)
+    verdicts = _build_verdict_rows(verdict, all_criteria, trial_id)
     return _build_batch_result(trial_id, trial, verdict, verdicts)

@@ -33,10 +33,11 @@ RULES
    - what could block eligibility
    - what to verify next
    - one concrete next action
-9. Merge duplicate gaps across trials.
-10. Rank gaps by decision impact, not by quantity.
-11. Keep executive summary concise, comparative, and clinically useful.
-12. Respond with structured fields conforming to the downstream ReportPlan Pydantic model.
+9. Ground each reason, blocker, and uncertainty in supplied criterion verdicts or trial metadata; omit unsupported claims or mark them as not enough evidence.
+10. Merge duplicate gaps across trials.
+11. Rank gaps by decision impact, not by quantity.
+12. Keep executive summary concise, comparative, and clinically useful.
+13. Respond with structured fields conforming to the downstream ReportPlan Pydantic model.
 
 TIER DEFINITIONS
 - strong, moderate, weak, disqualified are the only allowed tiers.

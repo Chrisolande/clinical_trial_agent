@@ -116,10 +116,13 @@ def format_trial_summary(trial: dict[str, Any], criteria: list[dict[str, Any]]) 
         f"phase: {trial.get('phase', '')}",
         f"status: {trial.get('overall_status', '')}",
     ]
-    lines = [
-        f"[{c.get('criteria_type', 'inclusion').lower()}] {sanitize_patient_profile(str(c.get('text', ''))).text}"
-        for c in criteria
-    ]
+    lines: list[str] = []
+    for criterion in criteria:
+        criteria_type = str(criterion.get("criteria_type", "inclusion")).lower()
+        criterion_id = str(criterion.get("criterion_id", "")).strip()
+        label = f"{criteria_type} {criterion_id}" if criterion_id else criteria_type
+        text = sanitize_patient_profile(str(criterion.get("text", ""))).text
+        lines.append(f"[{label}] {text}")
     return "\n".join([*meta, "", "criteria:", *lines])
 
 

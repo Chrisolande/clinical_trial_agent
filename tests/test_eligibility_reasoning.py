@@ -132,3 +132,58 @@ async def test_unverified_partial_criteria_cannot_produce_strong_tier(
     assert result["match_tier"] == "moderate"
     assert result["match_score"] <= 0.65
     assert result["criteria_source"] == "unverified_partial_source"
+
+
+@pytest.mark.asyncio
+async def test_verdict_rows_include_criterion_evidence_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_judge(*_: object, **__: object) -> JudgeVerdict:
+        return JudgeVerdict(
+            match_score=0.62,
+            match_tier="moderate",
+            major_criteria_assessable=True,
+            inclusion_met=["EGFR mutation present"],
+            inclusion_failed=[],
+            inclusion_uncertain=["ECOG performance status 0-1"],
+            exclusion_triggered=["Prior autoimmune disease"],
+            exclusion_uncertain=[],
+            critical_missing_info=["ECOG performance status"],
+            key_concern="Performance status needs confirmation",
+            rationale="Potential fit with one blocker and one uncertainty.",
+        )
+
+    monkeypatch.setattr(eligibility_reasoner, "_judge_trial", fake_judge)
+    result = await eligibility_reasoner.evaluate_criteria_batch(
+        patient_profile={"age": 62},
+        trial={"nct_id": "NCTEVID", "brief_title": "Demo Trial"},
+        all_criteria=[
+            {
+                "criterion_id": "NCTEVID_inc_0",
+                "criteria_type": "inclusion",
+                "text": "EGFR mutation present",
+            },
+            {
+                "criterion_id": "NCTEVID_inc_1",
+                "criteria_type": "inclusion",
+                "text": "ECOG performance status 0-1",
+            },
+            {
+                "criterion_id": "NCTEVID_exc_0",
+                "criteria_type": "exclusion",
+                "text": "Prior autoimmune disease",
+            },
+        ],
+    )
+
+    rows = {row["criterion_text"]: row for row in result["verdicts"]}
+    egfr = rows["EGFR mutation present"]
+    assert egfr["criterion_id"] == "NCTEVID_inc_0"
+    assert egfr["source_type"] == "parsed_inclusion"
+    assert egfr["evidence_refs"][0]["trial_id"] == "NCTEVID"
+    assert egfr["evidence_refs"][0]["verdict"] == "MEETS"
+
+    blocker = rows["Prior autoimmune disease"]
+    assert blocker["criterion_id"] == "NCTEVID_exc_0"
+    assert blocker["source_type"] == "parsed_exclusion"
+    assert blocker["verdict"] == "FAILS"

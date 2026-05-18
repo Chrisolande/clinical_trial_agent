@@ -54,21 +54,201 @@ def _partition_trials(
     return strong, moderate, weak, disqualified
 
 
-def _build_per_criterion_verdicts(verdict_details: dict[str, Any]) -> list[dict[str, str]]:
+def _build_per_criterion_verdicts(verdict_details: dict[str, Any]) -> list[dict[str, Any]]:
     mapping = {"MEETS": "eligible", "FAILS": "ineligible", "UNCERTAIN": "uncertain"}
-    rows: list[dict[str, str]] = []
+    rows: list[dict[str, Any]] = []
     for item in list(verdict_details.get("verdicts", [])):
         text = str(item.get("criterion_text", "")).strip()
         if not text:
             continue
         rows.append(
             {
+                "criterion_id": item.get("criterion_id"),
                 "criterion_text": text,
                 "verdict": mapping.get(str(item.get("verdict", "UNCERTAIN")), "uncertain"),
                 "reasoning": str(item.get("reasoning", "")),
+                "source_type": item.get("source_type"),
+                "evidence_refs": list(item.get("evidence_refs") or []),
             }
         )
     return rows
+
+
+_TRACE_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "based",
+    "be",
+    "by",
+    "criteria",
+    "criterion",
+    "for",
+    "in",
+    "is",
+    "it",
+    "known",
+    "main",
+    "major",
+    "no",
+    "of",
+    "or",
+    "patient",
+    "pending",
+    "supported",
+    "the",
+    "to",
+    "trial",
+    "with",
+}
+
+
+def _tokens(text: str) -> set[str]:
+    cleaned = "".join(ch.lower() if ch.isalnum() else " " for ch in str(text))
+    return {token for token in cleaned.split() if len(token) > 2 and token not in _TRACE_STOPWORDS}
+
+
+def _not_enough_evidence_ref(trial_id: str, claim: str) -> dict[str, Any]:
+    return {
+        "source_type": "not_enough_evidence",
+        "trial_id": trial_id,
+        "note": f"No supplied criterion or trial metadata evidence matched this claim: {claim}",
+    }
+
+
+def _row_evidence_ref(row: dict[str, Any], trial_id: str) -> dict[str, Any]:
+    source_type = str(row.get("source_type") or "").strip()
+    if source_type == "not_enough_evidence":
+        return _not_enough_evidence_ref(
+            trial_id,
+            str(row.get("criterion_text") or "criterion verdict"),
+        )
+    if source_type not in {"parsed_inclusion", "parsed_exclusion"}:
+        criterion_type = str(row.get("criterion_type", "")).strip().lower()
+        source_type = "parsed_exclusion" if criterion_type == "exclusion" else "parsed_inclusion"
+    return {
+        "source_type": source_type,
+        "trial_id": trial_id,
+        "criterion_id": row.get("criterion_id"),
+        "criterion_text": str(row.get("criterion_text", "")),
+        "verdict": str(row.get("verdict", "UNCERTAIN")).upper(),
+    }
+
+
+def _metadata_evidence_refs(claim: str, trial: dict[str, Any], trial_id: str) -> list[dict[str, Any]]:
+    claim_tokens = _tokens(claim)
+    refs: list[dict[str, Any]] = []
+    metadata_fields = ("brief_title", "overall_status", "phase", "lead_sponsor")
+    for field in metadata_fields:
+        value = str(trial.get(field, "")).strip()
+        if not value:
+            continue
+        if claim_tokens & _tokens(value):
+            refs.append(
+                {
+                    "source_type": "trial_metadata",
+                    "trial_id": trial_id,
+                    "metadata_field": field,
+                    "metadata_value": value,
+                }
+            )
+    return refs[:2]
+
+
+def _claim_evidence_refs(
+    claim: str,
+    trial: dict[str, Any],
+    *,
+    preferred_verdicts: set[str],
+) -> list[dict[str, Any]]:
+    trial_id = str(trial.get("trial_id") or trial.get("nct_id") or "")
+    claim_tokens = _tokens(claim)
+    scored_rows: list[tuple[int, dict[str, Any]]] = []
+    for row in list((trial.get("verdict_details") or {}).get("verdicts", [])):
+        verdict = str(row.get("verdict", "")).upper()
+        if verdict not in preferred_verdicts:
+            continue
+        overlap = len(claim_tokens & _tokens(str(row.get("criterion_text", ""))))
+        if overlap > 0:
+            scored_rows.append((overlap, row))
+
+    if scored_rows:
+        scored_rows.sort(key=lambda item: item[0], reverse=True)
+        return [_row_evidence_ref(row, trial_id) for _, row in scored_rows[:3]]
+
+    metadata_refs = _metadata_evidence_refs(claim, trial, trial_id)
+    if metadata_refs:
+        return metadata_refs
+
+    return [_not_enough_evidence_ref(trial_id, claim)]
+
+
+def _claim_evidence_entries(
+    claims: list[Any],
+    trial: dict[str, Any],
+    *,
+    preferred_verdicts: set[str],
+) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for claim in claims:
+        claim_text = str(claim).strip()
+        if not claim_text:
+            continue
+        entries.append(
+            {
+                "claim_text": claim_text,
+                "evidence_refs": _claim_evidence_refs(
+                    claim_text, trial, preferred_verdicts=preferred_verdicts
+                ),
+            }
+        )
+    return entries
+
+
+def _ensure_card_evidence(card: dict[str, Any], trial_lookup: dict[str, dict[str, Any]]) -> None:
+    trial_id = str(card.get("nct_id") or card.get("trial_id") or "")
+    trial = trial_lookup.get(trial_id, {"trial_id": trial_id})
+    card["why_it_matches_evidence"] = _claim_evidence_entries(
+        list(card.get("why_it_matches") or []),
+        trial,
+        preferred_verdicts={"MEETS"},
+    )
+    card["main_blockers_evidence"] = _claim_evidence_entries(
+        list(card.get("main_blockers") or []),
+        trial,
+        preferred_verdicts={"FAILS", "UNCERTAIN"},
+    )
+    card["key_uncertainties_evidence"] = _claim_evidence_entries(
+        list(card.get("key_uncertainties") or []),
+        trial,
+        preferred_verdicts={"UNCERTAIN"},
+    )
+    evidence_summary = str(card.get("evidence_summary", "")).strip()
+    if evidence_summary:
+        card["evidence_summary_refs"] = _claim_evidence_refs(
+            evidence_summary,
+            trial,
+            preferred_verdicts={"MEETS", "FAILS", "UNCERTAIN"},
+        )
+
+
+def _ensure_report_plan_evidence(
+    report_plan_dict: dict[str, Any], enriched_trials: list[dict[str, Any]]
+) -> dict[str, Any]:
+    updated = dict(report_plan_dict)
+    trial_lookup = {str(trial.get("trial_id", "")): trial for trial in enriched_trials}
+    for section in ("strong_matches", "moderate_matches"):
+        cards: list[dict[str, Any]] = []
+        for card in list(updated.get(section) or []):
+            if not isinstance(card, dict):
+                continue
+            enriched_card = dict(card)
+            _ensure_card_evidence(enriched_card, trial_lookup)
+            cards.append(enriched_card)
+        updated[section] = cards
+    return updated
 
 
 def _build_trial_report_entry(
@@ -107,6 +287,7 @@ def _build_report_payload(
     report_plan_dict = (
         report_plan.model_dump() if hasattr(report_plan, "model_dump") else dict(report_plan)
     )
+    report_plan_dict = _ensure_report_plan_evidence(report_plan_dict, enriched_trials)
     effective_summary = str(report_plan_dict.get("executive_summary", ""))
     patient_summary = str(report_plan_dict.get("patient_summary", ""))
     if retrieval_failed:

@@ -239,6 +239,102 @@ async def test_build_report_payload_and_plan_rendering(monkeypatch: pytest.Monke
     assert "Trial A is a stronger option than Trial B" in text
 
 
+@pytest.mark.asyncio
+async def test_report_cards_get_evidence_refs_or_not_enough_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_generate_report_plan(**_kwargs):
+        return ReportPlan.model_validate(
+            {
+                "patient_summary": "64 year old patient with NSCLC",
+                "executive_summary": "Evidence traceability test.",
+                "bottom_line": "Verify unresolved items.",
+                "strong_matches": [],
+                "moderate_matches": [
+                    {
+                        "nct_id": "NCTEVID",
+                        "title": "Evidence Trial",
+                        "tier": "moderate",
+                        "score": 0.64,
+                        "phase": "PHASE2",
+                        "status": "RECRUITING",
+                        "recommendation": "Continue screening review.",
+                        "why_it_matches": ["EGFR mutation present", "Travel appears feasible"],
+                        "main_blockers": ["Prior autoimmune disease"],
+                        "key_uncertainties": ["ECOG performance status pending"],
+                        "next_action": "Confirm ECOG and exclusion history.",
+                        "evidence_summary": "EGFR mutation present with ECOG uncertainty.",
+                    }
+                ],
+                "information_gaps": [],
+                "recommended_actions": [],
+                "excluded_summary": "none",
+                "limitations": [],
+            }
+        )
+
+    monkeypatch.setattr(report_generator, "generate_report_plan", fake_generate_report_plan)
+    report = await report_generator.build_report(
+        patient_profile={"age": 64, "primary_condition": "NSCLC"},
+        scored_trials=[
+            {
+                "trial_id": "NCTEVID",
+                "brief_title": "Evidence Trial",
+                "tier": "moderate",
+                "score": 0.64,
+                "critical_missing_info": ["ECOG performance status"],
+            }
+        ],
+        missing_info=[],
+        eligibility_verdicts={
+            "NCTEVID": {
+                "verdicts": [
+                    {
+                        "criterion_id": "NCTEVID_inc_0",
+                        "criterion_text": "EGFR mutation present",
+                        "verdict": "MEETS",
+                        "criterion_type": "inclusion",
+                        "source_type": "parsed_inclusion",
+                    },
+                    {
+                        "criterion_id": "NCTEVID_exc_0",
+                        "criterion_text": "Prior autoimmune disease",
+                        "verdict": "FAILS",
+                        "criterion_type": "exclusion",
+                        "source_type": "parsed_exclusion",
+                    },
+                    {
+                        "criterion_id": "NCTEVID_inc_1",
+                        "criterion_text": "ECOG performance status 0-1",
+                        "verdict": "UNCERTAIN",
+                        "criterion_type": "inclusion",
+                        "source_type": "parsed_inclusion",
+                    },
+                ]
+            }
+        },
+        trials_raw=[{}],
+        search_queries=["nsclc"],
+        decision_history=[],
+        qa_issues=[],
+    )
+
+    card = report["report_plan"]["moderate_matches"][0]
+    why_refs = card["why_it_matches_evidence"]
+    assert why_refs[0]["claim_text"] == "EGFR mutation present"
+    assert why_refs[0]["evidence_refs"][0]["criterion_id"] == "NCTEVID_inc_0"
+    assert why_refs[0]["evidence_refs"][0]["source_type"] == "parsed_inclusion"
+    assert why_refs[1]["evidence_refs"][0]["source_type"] == "not_enough_evidence"
+
+    blocker_ref = card["main_blockers_evidence"][0]["evidence_refs"][0]
+    assert blocker_ref["criterion_id"] == "NCTEVID_exc_0"
+    assert blocker_ref["source_type"] == "parsed_exclusion"
+
+    uncertainty_ref = card["key_uncertainties_evidence"][0]["evidence_refs"][0]
+    assert uncertainty_ref["criterion_id"] == "NCTEVID_inc_1"
+    assert uncertainty_ref["verdict"] == "UNCERTAIN"
+
+
 def test_n_a_leakage_in_gaps_triggers_sanitization_and_not_printed() -> None:
     report = _base_report_json(debug=False)
     report["report_plan"]["information_gaps"] = [
