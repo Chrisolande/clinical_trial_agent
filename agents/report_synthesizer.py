@@ -13,6 +13,11 @@ from tools.retry import llm_retry
 
 from clinical_trial_agent.config import get_llm, get_settings
 
+from .eligibility_prompt_builder import (
+    _assert_privacy_mode_allows_prompt,
+    format_patient_summary,
+)
+
 
 class SynthesisPromptInput(BaseModel):
     patient_profile: str = Field(min_length=1)
@@ -185,6 +190,8 @@ async def generate_report_plan(
     missing_info: list[dict[str, Any]],
     qa_issues: Sequence[dict[str, Any] | str],
 ) -> ReportPlan:
+    _assert_privacy_mode_allows_prompt()
+    patient_profile_text = format_patient_summary(patient_profile).strip()
     key_concerns = [
         {
             "trial_id": str(trial.get("trial_id", "")),
@@ -201,8 +208,8 @@ async def generate_report_plan(
         for trial in scored_trials
     ]
     prompt_input = SynthesisPromptInput(
-        patient_profile=_serialize(patient_profile),
-        patient_summary=_describe_patient(patient_profile),
+        patient_profile=patient_profile_text,
+        patient_summary=patient_profile_text,
         scored_trials=_serialize(scored_trials),
         eligibility_verdicts=_serialize(eligibility_verdicts),
         key_concerns=_serialize(key_concerns),
@@ -221,7 +228,9 @@ async def generate_report_plan(
         "qa_issues": prompt_input.qa_issues,
     }
     prompt = ChatPromptTemplate.from_template(build_synthesis_prompt())
-    chain = prompt | get_llm().with_structured_output(ReportPlan)
+    chain = prompt | get_llm(contains_phi=False, node_name="report_synthesis").with_structured_output(
+        ReportPlan
+    )
 
     try:
         report_plan = await _invoke_report_plan_llm(chain, context)

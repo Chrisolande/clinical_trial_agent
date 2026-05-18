@@ -75,7 +75,7 @@ def _studies_endpoint_url(base_url: str) -> str:
 
 
 def _contains_phi_params(params: dict[str, Any]) -> bool:
-    return bool(params.get("query.cond") or params.get("query.intr"))
+    return bool(params.get("query.cond") or params.get("query.intr") or params.get("query.term"))
 
 
 async def _request_with_transport(

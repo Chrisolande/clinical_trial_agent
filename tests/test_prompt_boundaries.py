@@ -81,7 +81,8 @@ async def test_synthesis_prompt_uses_chat_prompt_template(monkeypatch: pytest.Mo
         called["from_template"] = True
         return DummyPrompt()
 
-    monkeypatch.setattr(report_synthesizer, "get_llm", lambda: LLMStub())
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setattr(report_synthesizer, "get_llm", lambda **_kwargs: LLMStub())
     monkeypatch.setattr(report_synthesizer.ChatPromptTemplate, "from_template", _from_template)
 
     await report_synthesizer.generate_report_plan(

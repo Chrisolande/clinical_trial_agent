@@ -5,6 +5,71 @@ from tools.errors import ClinicalTrialsClientError
 import clinical_trial_agent.clinical_trials as clinical_trials
 
 
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"query.cond": "lung cancer"},
+        {"query.intr": "FOLFOX"},
+        {"query.term": "NSCLC EGFR positive"},
+        {"query.cond": "NSCLC", "query.intr": "osimertinib", "query.term": "EGFR exon 19"},
+    ],
+)
+def test_phi_params_include_condition_intervention_term_and_mixed(
+    params: dict[str, str],
+) -> None:
+    assert clinical_trials._contains_phi_params({"format": "json", **params}) is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"query.cond": "lung cancer"},
+        {"query.intr": "FOLFOX"},
+        {"query.term": "NSCLC EGFR positive"},
+        {"query.cond": "NSCLC", "query.intr": "osimertinib", "query.term": "EGFR exon 19"},
+    ],
+)
+async def test_phi_params_without_proxy_are_not_sent_directly(
+    monkeypatch: pytest.MonkeyPatch,
+    params: dict[str, str],
+) -> None:
+    calls: list[str] = []
+
+    class FakeClient:
+        async def get(self, *_args: object, **_kwargs: object) -> object:
+            calls.append("get")
+            raise AssertionError("PHI params must not use direct GET transport")
+
+        async def post(self, *_args: object, **_kwargs: object) -> object:
+            calls.append("post")
+            raise AssertionError("PHI params must not use direct POST transport")
+
+    monkeypatch.setattr(
+        clinical_trials,
+        "get_settings",
+        lambda: type(
+            "S",
+            (),
+            {
+                "ctgov_proxy_url": "",
+                "ctgov_proxy_token": SecretStr(""),
+                "ctgov_transport_mode": "get",
+            },
+        )(),
+    )
+
+    with pytest.raises(ClinicalTrialsClientError, match="requires CTGOV_PROXY_URL"):
+        await clinical_trials._request_with_transport(
+            FakeClient(),
+            "https://clinicaltrials.gov/api/v2/studies",
+            {"format": "json", **params},
+            clinical_trials.httpx.Timeout(30.0),
+        )
+
+    assert calls == []
+
+
 @pytest.mark.asyncio
 async def test_search_trials_success(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_request(url: str, params: dict[str, object]) -> dict[str, object]:
