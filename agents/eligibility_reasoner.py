@@ -8,6 +8,7 @@ from models.judge_verdict import JudgeVerdict
 from tools.retry import llm_retry
 
 from clinical_trial_agent.config import TIER_ORDER, get_llm
+from clinical_trial_agent.constants import ELIGIBILITY_EVIDENCE_CONTRACT_VERSION
 
 from .eligibility_fallback import fallback_verdict_for_exception, validate_verdict
 from .eligibility_prompt_builder import build_judge_messages
@@ -333,6 +334,7 @@ def _build_batch_result(
         "criteria_retrieved_at": trial.get("criteria_retrieved_at"),
         "criteria_completeness": trial.get("criteria_completeness", "missing"),
         "internal_fallback_used": getattr(verdict, "internal_fallback_used", False),
+        "evidence_contract_version": ELIGIBILITY_EVIDENCE_CONTRACT_VERSION,
         **cap_metadata,
     }
 

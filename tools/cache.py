@@ -2,6 +2,8 @@
 
 import hashlib
 import json
+import os
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -10,9 +12,15 @@ from diskcache import Cache, JSONDisk
 from loguru import logger
 
 from clinical_trial_agent.config import get_settings
+from clinical_trial_agent.constants import (
+    ELIGIBILITY_CACHE_SCHEMA_VERSION,
+    ELIGIBILITY_EVIDENCE_CONTRACT_VERSION,
+)
 from tools.postgres_base import PostgresBase
 
 _cache = Cache(get_settings().cache_dir, disk=JSONDisk)
+_eligibility_memory_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_ELIGIBILITY_DISK_CACHE_ENV = "ELIGIBILITY_VERDICT_ALLOW_DISK_CACHE"
 
 _DDL = """
     CREATE TABLE IF NOT EXISTS llm_cache (
@@ -31,6 +39,10 @@ def _make_key(prefix: str, data: Any) -> str:
     serialized = json.dumps(data, sort_keys=True, default=str)
     digest = hashlib.sha256(serialized.encode()).hexdigest()[:16]
     return f"{prefix}:{digest}"
+
+
+def _truthy_env(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def get_cached(prefix: str, params: Any) -> Any | None:
@@ -181,9 +193,112 @@ def _ttl_from_primary_completion_date(primary_completion_date: str | None) -> in
     return max(60, ttl)
 
 
+def _eligibility_disk_cache_enabled() -> bool:
+    return _truthy_env(_ELIGIBILITY_DISK_CACHE_ENV)
+
+
+def _eligibility_cache_params(nct_id: str, profile_hash: str) -> dict[str, Any]:
+    settings = get_settings()
+    return {
+        "nct_id": str(nct_id),
+        "profile_hash": str(profile_hash),
+        "tenant_id": settings.tenant_id,
+        "facility_id": settings.facility_id,
+        "privacy_mode": settings.llm_privacy_mode,
+        "cache_schema_version": ELIGIBILITY_CACHE_SCHEMA_VERSION,
+        "evidence_contract_version": ELIGIBILITY_EVIDENCE_CONTRACT_VERSION,
+    }
+
+
+def _eligibility_cache_metadata(params: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "cache_schema_version": ELIGIBILITY_CACHE_SCHEMA_VERSION,
+        "evidence_contract_version": ELIGIBILITY_EVIDENCE_CONTRACT_VERSION,
+        "scope": params,
+    }
+
+
+def _wrap_eligibility_verdict(
+    verdict: dict[str, Any], params: dict[str, Any]
+) -> dict[str, Any]:
+    return {
+        "_cache_metadata": _eligibility_cache_metadata(params),
+        "verdict": {
+            **verdict,
+            "evidence_contract_version": ELIGIBILITY_EVIDENCE_CONTRACT_VERSION,
+        },
+    }
+
+
+def _verdict_rows_have_evidence_metadata(verdict: dict[str, Any]) -> bool:
+    rows = verdict.get("verdicts", [])
+    if not isinstance(rows, list):
+        return False
+    for row in rows:
+        if not isinstance(row, dict):
+            return False
+        if "source_type" not in row:
+            return False
+        evidence_refs = row.get("evidence_refs")
+        if not isinstance(evidence_refs, list) or not evidence_refs:
+            return False
+        if not all(isinstance(ref, dict) and ref.get("source_type") for ref in evidence_refs):
+            return False
+    return True
+
+
+def _unwrap_eligibility_verdict(
+    payload: Any, expected_params: dict[str, Any]
+) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    metadata = payload.get("_cache_metadata")
+    verdict = payload.get("verdict")
+    if not isinstance(metadata, dict) or not isinstance(verdict, dict):
+        return None
+    if metadata.get("cache_schema_version") != ELIGIBILITY_CACHE_SCHEMA_VERSION:
+        return None
+    if metadata.get("evidence_contract_version") != ELIGIBILITY_EVIDENCE_CONTRACT_VERSION:
+        return None
+    if metadata.get("scope") != expected_params:
+        return None
+    if verdict.get("evidence_contract_version") != ELIGIBILITY_EVIDENCE_CONTRACT_VERSION:
+        return None
+    if not _verdict_rows_have_evidence_metadata(verdict):
+        return None
+    return dict(verdict)
+
+
+def _get_memory_cached_eligibility(params: dict[str, Any]) -> dict[str, Any] | None:
+    key = _make_key("eligibility_verdict", params)
+    entry = _eligibility_memory_cache.get(key)
+    if entry is None:
+        return None
+    expires_at, payload = entry
+    if expires_at <= time.time():
+        _eligibility_memory_cache.pop(key, None)
+        return None
+    return payload
+
+
+def _set_memory_cached_eligibility(
+    params: dict[str, Any], payload: dict[str, Any], ttl_seconds: int
+) -> None:
+    key = _make_key("eligibility_verdict", params)
+    _eligibility_memory_cache[key] = (time.time() + ttl_seconds, payload)
+
+
 def get_cached_eligibility_verdict(nct_id: str, profile_hash: str) -> dict[str, Any] | None:
-    result = get_cached("eligibility_verdict", {"nct_id": nct_id, "profile_hash": profile_hash})
-    return result if isinstance(result, dict) else None
+    if not get_settings().use_cache:
+        return None
+    params = _eligibility_cache_params(nct_id, profile_hash)
+    result = _get_memory_cached_eligibility(params)
+    if result is None and _eligibility_disk_cache_enabled():
+        result = get_cached("eligibility_verdict", params)
+    verdict = _unwrap_eligibility_verdict(result, params)
+    if verdict is None and result is not None:
+        logger.info("Ignoring stale or untrusted eligibility verdict cache entry", nct_id=nct_id)
+    return verdict
 
 
 def set_cached_eligibility_verdict(
@@ -192,10 +307,11 @@ def set_cached_eligibility_verdict(
     verdict: dict[str, Any],
     primary_completion_date: str | None = None,
 ) -> None:
+    if not get_settings().use_cache:
+        return
+    params = _eligibility_cache_params(nct_id, profile_hash)
     ttl = _ttl_from_primary_completion_date(primary_completion_date)
-    set_cached(
-        "eligibility_verdict",
-        {"nct_id": nct_id, "profile_hash": profile_hash},
-        verdict,
-        ttl_seconds=ttl,
-    )
+    payload = _wrap_eligibility_verdict(verdict, params)
+    _set_memory_cached_eligibility(params, payload, ttl)
+    if _eligibility_disk_cache_enabled():
+        set_cached("eligibility_verdict", params, payload, ttl_seconds=ttl)

@@ -30,7 +30,16 @@ def test_patient_profile_to_dict_and_trial_id_and_tokenize(
     assert "age" in toks
 
     monkeypatch.setenv("PROFILE_HASH_SALT", "salt")
-    assert nodes._profile_hash_for_cache({"a": 1}) == nodes._profile_hash_for_cache({"a": 1})
+    settings = SimpleNamespace(
+        tenant_id="tenant-a",
+        facility_id="facility-a",
+        llm_privacy_mode="deidentified",
+    )
+    monkeypatch.setattr(nodes._nodes_helpers, "get_settings", lambda: settings)
+    baseline_hash = nodes._profile_hash_for_cache({"a": 1})
+    assert baseline_hash == nodes._profile_hash_for_cache({"a": 1})
+    settings.tenant_id = "tenant-b"
+    assert nodes._profile_hash_for_cache({"a": 1}) != baseline_hash
 
 
 @pytest.mark.asyncio

@@ -34,7 +34,10 @@ async def test_parse_eligibility_criteria_uses_cache_hit(monkeypatch: pytest.Mon
     async def fake_to_thread(func, *args, **kwargs):
         _ = (args, kwargs)
         if func is criteria_parser.cache.get_cached:
-            return {"inclusion_criteria": [{"text": "cached"}], "exclusion_criteria": []}
+            return {
+                "inclusion_criteria": [{"text": "cached", "criterion_id": "stale-id"}],
+                "exclusion_criteria": [],
+            }
         return None
 
     monkeypatch.setattr(criteria_parser.asyncio, "to_thread", fake_to_thread)

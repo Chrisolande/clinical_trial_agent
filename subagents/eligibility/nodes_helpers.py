@@ -5,7 +5,11 @@ from typing import Any
 
 from tools.medical_synonyms import expand_condition_tokens
 
-from clinical_trial_agent.config import TIER_ORDER
+from clinical_trial_agent.config import TIER_ORDER, get_settings
+from clinical_trial_agent.constants import (
+    ELIGIBILITY_CACHE_SCHEMA_VERSION,
+    ELIGIBILITY_EVIDENCE_CONTRACT_VERSION,
+)
 
 
 def _patient_profile_to_dict(patient_profile: Any) -> dict[str, Any]:
@@ -22,7 +26,21 @@ def _trial_id(trial: dict[str, Any]) -> str:
 
 
 def _profile_hash_for_cache(patient_profile: dict[str, Any]) -> str:
-    canonical = json.dumps(patient_profile, sort_keys=True, default=str)
+    settings = get_settings()
+    canonical = json.dumps(
+        {
+            "patient_profile": patient_profile,
+            "scope": {
+                "tenant_id": settings.tenant_id,
+                "facility_id": settings.facility_id,
+                "privacy_mode": settings.llm_privacy_mode,
+                "cache_schema_version": ELIGIBILITY_CACHE_SCHEMA_VERSION,
+                "evidence_contract_version": ELIGIBILITY_EVIDENCE_CONTRACT_VERSION,
+            },
+        },
+        sort_keys=True,
+        default=str,
+    )
     salt = os.getenv("PROFILE_HASH_SALT", "")
     return hashlib.sha256(f"{salt}::{canonical}".encode()).hexdigest()
 
