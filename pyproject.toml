@@ -33,22 +33,20 @@ dependencies = [
     "loguru>=0.7.2",
     "openai>=1.45.0",
     "cryptography>=46.0.7",
-
     # Biomedical NLP stack
     "numpy>=1.26.4,<2.0.0",
     "spacy>=3.7.4,<3.8.0",
     "thinc>=8.2.5,<8.3.0",
     "scispacy>=0.5.5,<0.6.0",
     "en-core-sci-sm @ https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.4/en_core_sci_sm-0.5.4.tar.gz",
-
     "nltk>=3.9.1",
     "langsmith>=0.7.31",
     "lizard>=1.22.1",
     "scikit-learn>=1.8.0",
     "langgraph-checkpoint-postgres>=3.1.0",
-
     # Avoid psycopg/libpq wrapper errors on systems missing PostgreSQL client libs.
     "psycopg[binary]>=3.3.4",
+    "pre-commit>=4.6.0",
 ]
 
 [project.scripts]
@@ -131,33 +129,7 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = [
-    "tests/test_supervisor.py",
-    "tests/test_retrieval_nodes.py",
-    "tests/test_search_refiner.py",
-    "tests/test_criteria_parser.py",
-    "tests/test_eligibility_reasoning.py",
-    "tests/test_eligibility_nodes.py",
-    "tests/test_eligibility_nodes_worker_paths.py",
-    "tests/test_eligibility_fallback.py",
-    "tests/test_synthesis.py",
-    "tests/test_clinical_trials.py",
-    "tests/test_clinical_trials_core.py",
-    "tests/test_clinical_trials_retry.py",
-    "tests/test_clinical_trials_transport.py",
-    "tests/test_consent_guard.py",
-    "tests/test_config.py",
-    "tests/test_patient_parser.py",
-    "tests/test_missing_info.py",
-    "tests/test_qa_checker.py",
-    "tests/test_report_generator.py",
-    "tests/test_eligibility_provider_regressions.py",
-    "tests/test_query_helpers.py",
-    "tests/test_missing_info_node.py",
-    "tests/test_patient_parser_unit.py",
-    "tests/test_validate_env_unit.py",
-    "tests/test_qa_remediation.py",
-    "tests/test_supervisor_helpers_unit.py",
-    "tests/test_trial_search_unit.py",
+    "tests",
 ]
 addopts = "--tb=short --strict-markers -q"
 markers = [
