@@ -176,7 +176,9 @@ def _row_evidence_ref(row: dict[str, Any], trial_id: str) -> dict[str, Any]:
     }
 
 
-def _metadata_evidence_refs(claim: str, trial: dict[str, Any], trial_id: str) -> list[dict[str, Any]]:
+def _metadata_evidence_refs(
+    claim: str, trial: dict[str, Any], trial_id: str
+) -> list[dict[str, Any]]:
     claim_tokens = _tokens(claim)
     refs: list[dict[str, Any]] = []
     metadata_fields = ("brief_title", "overall_status", "phase", "lead_sponsor")
@@ -199,7 +201,9 @@ def _metadata_evidence_refs(claim: str, trial: dict[str, Any], trial_id: str) ->
 def _has_conflicting_assertion(claim: str, evidence_text: str) -> bool:
     claim_tokens = _tokens(claim)
     evidence_tokens = _tokens(evidence_text)
-    shared_subject = claim_tokens & evidence_tokens - _POSITIVE_ASSERTION_TOKENS - _NEGATIVE_ASSERTION_TOKENS
+    shared_subject = (
+        claim_tokens & evidence_tokens - _POSITIVE_ASSERTION_TOKENS - _NEGATIVE_ASSERTION_TOKENS
+    )
     if not shared_subject:
         return False
     claim_positive = bool(claim_tokens & _POSITIVE_ASSERTION_TOKENS)
@@ -280,7 +284,9 @@ def _mentions_claim(text: str, claim: str) -> bool:
     claim_tokens = _tokens(claim)
     if not claim_tokens:
         return False
-    return claim.lower() in text.lower() or len(text_tokens & claim_tokens) >= min(3, len(claim_tokens))
+    return claim.lower() in text.lower() or len(text_tokens & claim_tokens) >= min(
+        3, len(claim_tokens)
+    )
 
 
 def _looks_like_positive_eligibility_claim(text: str) -> bool:
@@ -305,7 +311,9 @@ def _demote_unsupported_text_field(
     text = str(card.get(field) or "").strip()
     if not text:
         return
-    mentioned_claim = next((claim for claim in unsupported_claims if _mentions_claim(text, claim)), "")
+    mentioned_claim = next(
+        (claim for claim in unsupported_claims if _mentions_claim(text, claim)), ""
+    )
     unsupported_assertion = bool(mentioned_claim) or (
         _looks_like_positive_eligibility_claim(text)
         and not _supported_as_positive_claim(text, trial)

@@ -218,9 +218,7 @@ def _eligibility_cache_metadata(params: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _wrap_eligibility_verdict(
-    verdict: dict[str, Any], params: dict[str, Any]
-) -> dict[str, Any]:
+def _wrap_eligibility_verdict(verdict: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
     return {
         "_cache_metadata": _eligibility_cache_metadata(params),
         "verdict": {

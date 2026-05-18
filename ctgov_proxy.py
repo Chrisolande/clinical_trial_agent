@@ -63,7 +63,9 @@ async def proxy_search(
         async with httpx.AsyncClient(timeout=30.0, headers=_upstream_headers()) as client:
             upstream = await client.get(endpoint, params=request.params)
     except httpx.RequestError as exc:
-        raise HTTPException(status_code=502, detail="ClinicalTrials.gov upstream unavailable") from exc
+        raise HTTPException(
+            status_code=502, detail="ClinicalTrials.gov upstream unavailable"
+        ) from exc
 
     return Response(
         content=upstream.content,

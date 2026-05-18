@@ -326,9 +326,10 @@ async def test_report_cards_get_evidence_refs_or_not_enough_evidence(
     assert why_refs[0]["evidence_refs"][0]["criterion_id"] == "NCTEVID_inc_0"
     assert why_refs[0]["evidence_refs"][0]["source_type"] == "parsed_inclusion"
     assert len(why_refs) == 1
-    assert "Unsupported match claim requires confirmation: Travel appears feasible" in card[
-        "key_uncertainties"
-    ]
+    assert (
+        "Unsupported match claim requires confirmation: Travel appears feasible"
+        in card["key_uncertainties"]
+    )
 
     blocker_ref = card["main_blockers_evidence"][0]["evidence_refs"][0]
     assert blocker_ref["criterion_id"] == "NCTEVID_exc_0"
@@ -406,9 +407,10 @@ async def test_negated_evidence_does_not_support_positive_match_claim(
     card = report["report_plan"]["moderate_matches"][0]
     assert card["why_it_matches"] == []
     assert card["why_it_matches_evidence"] == []
-    assert "Unsupported match claim requires confirmation: EGFR mutation present" in card[
-        "key_uncertainties"
-    ]
+    assert (
+        "Unsupported match claim requires confirmation: EGFR mutation present"
+        in card["key_uncertainties"]
+    )
     assert "Why it fits:\n- EGFR mutation present" not in build_text_report(report)
 
 
@@ -476,9 +478,10 @@ async def test_legacy_verdict_without_evidence_metadata_does_not_support_match_c
 
     card = report["report_plan"]["moderate_matches"][0]
     assert card["why_it_matches"] == []
-    assert "Unsupported match claim requires confirmation: EGFR mutation present" in card[
-        "key_uncertainties"
-    ]
+    assert (
+        "Unsupported match claim requires confirmation: EGFR mutation present"
+        in card["key_uncertainties"]
+    )
     assert card["evidence_summary_refs"][0]["source_type"] == "not_enough_evidence"
     assert "EGFR mutation present" not in card["evidence_summary_refs"][0]["note"]
 

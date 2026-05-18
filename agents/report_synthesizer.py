@@ -228,9 +228,9 @@ async def generate_report_plan(
         "qa_issues": prompt_input.qa_issues,
     }
     prompt = ChatPromptTemplate.from_template(build_synthesis_prompt())
-    chain = prompt | get_llm(contains_phi=False, node_name="report_synthesis").with_structured_output(
-        ReportPlan
-    )
+    chain = prompt | get_llm(
+        contains_phi=False, node_name="report_synthesis"
+    ).with_structured_output(ReportPlan)
 
     try:
         report_plan = await _invoke_report_plan_llm(chain, context)
