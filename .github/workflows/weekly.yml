@@ -61,7 +61,19 @@ jobs:
         run: uv sync --locked --all-groups
 
       - name: Run integration tests
-        run: uv run --all-groups pytest -m integration --maxfail=1 -q
+        shell: bash
+        run: |
+          set +e
+          uv run --all-groups pytest -m integration --maxfail=1 -q
+          status=$?
+          set -e
+
+          if [ "$status" -eq 5 ]; then
+            echo "No integration tests selected (-m integration). Treating as non-failure."
+            exit 0
+          fi
+
+          exit "$status"
 
   build-and-push-weekly:
     name: Build and push weekly Docker image
