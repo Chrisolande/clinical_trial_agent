@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
-
 from tools import medication_safety, profile_validator
 
 
@@ -88,11 +87,12 @@ def test_validate_patient_profile_fully_valid() -> None:
 
 
 def test_normalize_medication_dict_entry_and_errors() -> None:
-    assert medication_safety._normalize_medication_dict_entry(
-        {"name": " Warfarin ", "dose": "5 mg"}
-    ) == "warfarin"
+    assert (
+        medication_safety._normalize_medication_dict_entry({"name": " Warfarin ", "dose": "5 mg"})
+        == "warfarin"
+    )
 
-    with pytest.raises(ValueError, match="medication.name is required"):
+    with pytest.raises(ValueError, match=r"medication\.name is required"):
         medication_safety._normalize_medication_dict_entry({"dose": "5 mg"})
 
     with pytest.raises(ValueError, match="malformed dose"):
@@ -108,7 +108,14 @@ def test_normalize_medication_entry_variants() -> None:
 
 def test_normalize_medications_and_interventions_deduplicate() -> None:
     meds = medication_safety._normalize_medications(
-        {"medications": ["Aspirin", "aspirin", {"name": "Warfarin"}, {"name": "warfarin"}]}
+        {
+            "medications": [
+                "Aspirin",
+                "aspirin",
+                {"name": "Warfarin"},
+                {"name": "warfarin"},
+            ]
+        }
     )
     interventions = medication_safety._normalize_interventions(
         {"interventions": ["  ibuprofen ", "", 1, "ibuprofen", "linezolid"]}
@@ -121,7 +128,12 @@ def test_evaluate_medication_safety_empty_inputs() -> None:
     result = medication_safety.evaluate_medication_safety(
         {"medications": []}, {"interventions": []}
     )
-    assert result == {"safe": True, "disqualify": False, "severity": "low", "issues": []}
+    assert result == {
+        "safe": True,
+        "disqualify": False,
+        "severity": "low",
+        "issues": [],
+    }
 
 
 def test_evaluate_medication_safety_detects_interaction() -> None:
@@ -138,4 +150,9 @@ def test_evaluate_medication_safety_no_interaction() -> None:
     result = medication_safety.evaluate_medication_safety(
         {"medications": ["metformin"]}, {"interventions": ["linezolid"]}
     )
-    assert result == {"safe": True, "disqualify": False, "severity": "low", "issues": []}
+    assert result == {
+        "safe": True,
+        "disqualify": False,
+        "severity": "low",
+        "issues": [],
+    }

@@ -52,7 +52,9 @@ class _Store(postgres_base.PostgresBase):
 def test_redact_dsn() -> None:
     assert postgres_base.redact_dsn("postgresql://localhost/db") == "postgresql://localhost/db"
     assert (
-        postgres_base.redact_dsn("postgresql://user:secret@localhost:5432/db")
+        postgres_base.redact_dsn(
+            "postgresql://user:example-password@localhost:5432/db"  # pragma: allowlist secret
+        )
         == "postgresql://user:***@localhost:5432/db"
     )
 
