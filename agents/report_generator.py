@@ -104,6 +104,34 @@ _TRACE_STOPWORDS = {
     "with",
 }
 
+_POSITIVE_ASSERTION_TOKENS = {
+    "detected",
+    "expressed",
+    "mutated",
+    "mutation",
+    "positive",
+    "present",
+}
+_NEGATIVE_ASSERTION_TOKENS = {
+    "absent",
+    "negative",
+    "undetected",
+    "without",
+    "wildtype",
+}
+_ELIGIBILITY_ASSERTION_TOKENS = {
+    "candidate",
+    "eligible",
+    "eligibility",
+    "fit",
+    "fits",
+    "match",
+    "matches",
+    "meets",
+    "qualifies",
+    "suitable",
+}
+
 
 def _tokens(text: str) -> set[str]:
     cleaned = "".join(ch.lower() if ch.isalnum() else " " for ch in str(text))
@@ -111,16 +139,27 @@ def _tokens(text: str) -> set[str]:
 
 
 def _not_enough_evidence_ref(trial_id: str, claim: str) -> dict[str, Any]:
+    _ = claim
     return {
         "source_type": "not_enough_evidence",
         "trial_id": trial_id,
-        "note": f"No supplied criterion or trial metadata evidence matched this claim: {claim}",
+        "note": "No supplied criterion or trial metadata evidence matched this claim.",
     }
+
+
+def _has_supported_row_provenance(row: dict[str, Any]) -> bool:
+    source_type = str(row.get("source_type") or "").strip()
+    return source_type in {"parsed_inclusion", "parsed_exclusion"} and bool(row.get("criterion_id"))
 
 
 def _row_evidence_ref(row: dict[str, Any], trial_id: str) -> dict[str, Any]:
     source_type = str(row.get("source_type") or "").strip()
     if source_type == "not_enough_evidence":
+        return _not_enough_evidence_ref(
+            trial_id,
+            str(row.get("criterion_text") or "criterion verdict"),
+        )
+    if not _has_supported_row_provenance(row):
         return _not_enough_evidence_ref(
             trial_id,
             str(row.get("criterion_text") or "criterion verdict"),
@@ -157,6 +196,19 @@ def _metadata_evidence_refs(claim: str, trial: dict[str, Any], trial_id: str) ->
     return refs[:2]
 
 
+def _has_conflicting_assertion(claim: str, evidence_text: str) -> bool:
+    claim_tokens = _tokens(claim)
+    evidence_tokens = _tokens(evidence_text)
+    shared_subject = claim_tokens & evidence_tokens - _POSITIVE_ASSERTION_TOKENS - _NEGATIVE_ASSERTION_TOKENS
+    if not shared_subject:
+        return False
+    claim_positive = bool(claim_tokens & _POSITIVE_ASSERTION_TOKENS)
+    claim_negative = bool(claim_tokens & _NEGATIVE_ASSERTION_TOKENS)
+    evidence_positive = bool(evidence_tokens & _POSITIVE_ASSERTION_TOKENS)
+    evidence_negative = bool(evidence_tokens & _NEGATIVE_ASSERTION_TOKENS)
+    return (claim_positive and evidence_negative) or (claim_negative and evidence_positive)
+
+
 def _claim_evidence_refs(
     claim: str,
     trial: dict[str, Any],
@@ -169,6 +221,8 @@ def _claim_evidence_refs(
     for row in list((trial.get("verdict_details") or {}).get("verdicts", [])):
         verdict = str(row.get("verdict", "")).upper()
         if verdict not in preferred_verdicts:
+            continue
+        if _has_conflicting_assertion(claim, str(row.get("criterion_text", ""))):
             continue
         overlap = len(claim_tokens & _tokens(str(row.get("criterion_text", ""))))
         if overlap > 0:
@@ -207,21 +261,93 @@ def _claim_evidence_entries(
     return entries
 
 
+def _has_supporting_evidence(entry: dict[str, Any]) -> bool:
+    return any(
+        str(ref.get("source_type") or "") != "not_enough_evidence"
+        for ref in list(entry.get("evidence_refs") or [])
+        if isinstance(ref, dict)
+    )
+
+
+def _append_unique(values: list[Any], value: str) -> None:
+    normalized = value.strip().lower()
+    if normalized and normalized not in {str(item).strip().lower() for item in values}:
+        values.append(value)
+
+
+def _mentions_claim(text: str, claim: str) -> bool:
+    text_tokens = _tokens(text)
+    claim_tokens = _tokens(claim)
+    if not claim_tokens:
+        return False
+    return claim.lower() in text.lower() or len(text_tokens & claim_tokens) >= min(3, len(claim_tokens))
+
+
+def _looks_like_positive_eligibility_claim(text: str) -> bool:
+    tokens = _tokens(text)
+    if not (tokens & _ELIGIBILITY_ASSERTION_TOKENS):
+        return False
+    conditional_terms = {"confirm", "confirmation", "if", "pending", "review", "screening"}
+    return not bool(tokens & conditional_terms)
+
+
+def _supported_as_positive_claim(text: str, trial: dict[str, Any]) -> bool:
+    refs = _claim_evidence_refs(text, trial, preferred_verdicts={"MEETS"})
+    return any(str(ref.get("source_type") or "") != "not_enough_evidence" for ref in refs)
+
+
+def _demote_unsupported_text_field(
+    card: dict[str, Any],
+    field: str,
+    trial: dict[str, Any],
+    unsupported_claims: list[str],
+) -> None:
+    text = str(card.get(field) or "").strip()
+    if not text:
+        return
+    mentioned_claim = next((claim for claim in unsupported_claims if _mentions_claim(text, claim)), "")
+    unsupported_assertion = bool(mentioned_claim) or (
+        _looks_like_positive_eligibility_claim(text)
+        and not _supported_as_positive_claim(text, trial)
+    )
+    if not unsupported_assertion:
+        return
+    claim_text = mentioned_claim or "eligibility claim"
+    card[field] = f"Uncertainty: {claim_text} needs confirmation before use as a match reason."
+
+
 def _ensure_card_evidence(card: dict[str, Any], trial_lookup: dict[str, dict[str, Any]]) -> None:
     trial_id = str(card.get("nct_id") or card.get("trial_id") or "")
     trial = trial_lookup.get(trial_id, {"trial_id": trial_id})
-    card["why_it_matches_evidence"] = _claim_evidence_entries(
+    why_entries = _claim_evidence_entries(
         list(card.get("why_it_matches") or []),
         trial,
         preferred_verdicts={"MEETS"},
     )
+    supported_why_entries = [entry for entry in why_entries if _has_supporting_evidence(entry)]
+    unsupported_claims = [
+        str(entry.get("claim_text", "")).strip()
+        for entry in why_entries
+        if not _has_supporting_evidence(entry)
+    ]
+    card["why_it_matches"] = [entry["claim_text"] for entry in supported_why_entries]
+    card["why_it_matches_evidence"] = supported_why_entries
+
+    uncertainties = list(card.get("key_uncertainties") or [])
+    for claim in unsupported_claims:
+        if claim:
+            _append_unique(uncertainties, f"Unsupported match claim requires confirmation: {claim}")
+    card["key_uncertainties"] = uncertainties
+    _demote_unsupported_text_field(card, "recommendation", trial, unsupported_claims)
+    _demote_unsupported_text_field(card, "next_action", trial, unsupported_claims)
+
     card["main_blockers_evidence"] = _claim_evidence_entries(
         list(card.get("main_blockers") or []),
         trial,
         preferred_verdicts={"FAILS", "UNCERTAIN"},
     )
     card["key_uncertainties_evidence"] = _claim_evidence_entries(
-        list(card.get("key_uncertainties") or []),
+        uncertainties,
         trial,
         preferred_verdicts={"UNCERTAIN"},
     )

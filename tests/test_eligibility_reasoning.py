@@ -187,3 +187,43 @@ async def test_verdict_rows_include_criterion_evidence_metadata(
     assert blocker["criterion_id"] == "NCTEVID_exc_0"
     assert blocker["source_type"] == "parsed_exclusion"
     assert blocker["verdict"] == "FAILS"
+
+
+@pytest.mark.asyncio
+async def test_positive_verdict_without_criterion_provenance_is_uncertain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_judge(*_: object, **__: object) -> JudgeVerdict:
+        return JudgeVerdict(
+            match_score=0.76,
+            match_tier="moderate",
+            major_criteria_assessable=True,
+            inclusion_met=["EGFR mutation present"],
+            inclusion_failed=[],
+            inclusion_uncertain=[],
+            exclusion_triggered=[],
+            exclusion_uncertain=[],
+            critical_missing_info=[],
+            key_concern="",
+            rationale="Synthetic response with unsupported positive claim.",
+        )
+
+    monkeypatch.setattr(eligibility_reasoner, "_judge_trial", fake_judge)
+    result = await eligibility_reasoner.evaluate_criteria_batch(
+        patient_profile={"age": 62},
+        trial={"nct_id": "NCTLEGACY", "brief_title": "Demo Trial"},
+        all_criteria=[
+            {
+                "criterion_id": "NCTLEGACY_inc_0",
+                "criteria_type": "inclusion",
+                "text": "EGFR mutation absent",
+            }
+        ],
+    )
+
+    row = result["verdicts"][0]
+    assert row["criterion_text"] == "EGFR mutation present"
+    assert row["verdict"] == "UNCERTAIN"
+    assert row["source_type"] == "not_enough_evidence"
+    assert result["meets_count"] == 0
+    assert result["uncertain_count"] == 1

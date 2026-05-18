@@ -321,10 +321,14 @@ async def test_report_cards_get_evidence_refs_or_not_enough_evidence(
 
     card = report["report_plan"]["moderate_matches"][0]
     why_refs = card["why_it_matches_evidence"]
+    assert card["why_it_matches"] == ["EGFR mutation present"]
     assert why_refs[0]["claim_text"] == "EGFR mutation present"
     assert why_refs[0]["evidence_refs"][0]["criterion_id"] == "NCTEVID_inc_0"
     assert why_refs[0]["evidence_refs"][0]["source_type"] == "parsed_inclusion"
-    assert why_refs[1]["evidence_refs"][0]["source_type"] == "not_enough_evidence"
+    assert len(why_refs) == 1
+    assert "Unsupported match claim requires confirmation: Travel appears feasible" in card[
+        "key_uncertainties"
+    ]
 
     blocker_ref = card["main_blockers_evidence"][0]["evidence_refs"][0]
     assert blocker_ref["criterion_id"] == "NCTEVID_exc_0"
@@ -333,6 +337,210 @@ async def test_report_cards_get_evidence_refs_or_not_enough_evidence(
     uncertainty_ref = card["key_uncertainties_evidence"][0]["evidence_refs"][0]
     assert uncertainty_ref["criterion_id"] == "NCTEVID_inc_1"
     assert uncertainty_ref["verdict"] == "UNCERTAIN"
+
+
+@pytest.mark.asyncio
+async def test_negated_evidence_does_not_support_positive_match_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_generate_report_plan(**_kwargs):
+        return ReportPlan.model_validate(
+            {
+                "patient_summary": "64 year old patient with NSCLC",
+                "executive_summary": "Negation traceability test.",
+                "bottom_line": "Verify biomarker status.",
+                "strong_matches": [],
+                "moderate_matches": [
+                    {
+                        "nct_id": "NCTNEG",
+                        "title": "Negation Trial",
+                        "tier": "moderate",
+                        "score": 0.64,
+                        "recommendation": "Continue screening review.",
+                        "why_it_matches": ["EGFR mutation present"],
+                        "main_blockers": [],
+                        "key_uncertainties": [],
+                        "next_action": "Confirm biomarker status.",
+                        "evidence_summary": "EGFR mutation present.",
+                    }
+                ],
+                "information_gaps": [],
+                "recommended_actions": [],
+                "excluded_summary": "none",
+                "limitations": [],
+            }
+        )
+
+    monkeypatch.setattr(report_generator, "generate_report_plan", fake_generate_report_plan)
+    report = await report_generator.build_report(
+        patient_profile={"age": 64, "primary_condition": "NSCLC"},
+        scored_trials=[
+            {
+                "trial_id": "NCTNEG",
+                "brief_title": "Negation Trial",
+                "tier": "moderate",
+                "score": 0.64,
+                "critical_missing_info": [],
+            }
+        ],
+        missing_info=[],
+        eligibility_verdicts={
+            "NCTNEG": {
+                "verdicts": [
+                    {
+                        "criterion_id": "NCTNEG_inc_0",
+                        "criterion_text": "EGFR mutation absent",
+                        "verdict": "MEETS",
+                        "criterion_type": "inclusion",
+                        "source_type": "parsed_inclusion",
+                    }
+                ]
+            }
+        },
+        trials_raw=[{}],
+        search_queries=["nsclc"],
+        decision_history=[],
+        qa_issues=[],
+    )
+
+    card = report["report_plan"]["moderate_matches"][0]
+    assert card["why_it_matches"] == []
+    assert card["why_it_matches_evidence"] == []
+    assert "Unsupported match claim requires confirmation: EGFR mutation present" in card[
+        "key_uncertainties"
+    ]
+    assert "Why it fits:\n- EGFR mutation present" not in build_text_report(report)
+
+
+@pytest.mark.asyncio
+async def test_legacy_verdict_without_evidence_metadata_does_not_support_match_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_generate_report_plan(**_kwargs):
+        return ReportPlan.model_validate(
+            {
+                "patient_summary": "64 year old patient with NSCLC",
+                "executive_summary": "Legacy verdict traceability test.",
+                "bottom_line": "Verify biomarker status.",
+                "strong_matches": [],
+                "moderate_matches": [
+                    {
+                        "nct_id": "NCTLEGACY",
+                        "title": "Legacy Trial",
+                        "tier": "moderate",
+                        "score": 0.64,
+                        "recommendation": "Continue screening review.",
+                        "why_it_matches": ["EGFR mutation present"],
+                        "main_blockers": [],
+                        "key_uncertainties": [],
+                        "next_action": "Confirm biomarker status.",
+                        "evidence_summary": "EGFR mutation present.",
+                    }
+                ],
+                "information_gaps": [],
+                "recommended_actions": [],
+                "excluded_summary": "none",
+                "limitations": [],
+            }
+        )
+
+    monkeypatch.setattr(report_generator, "generate_report_plan", fake_generate_report_plan)
+    report = await report_generator.build_report(
+        patient_profile={"age": 64, "primary_condition": "NSCLC"},
+        scored_trials=[
+            {
+                "trial_id": "NCTLEGACY",
+                "brief_title": "Legacy Trial",
+                "tier": "moderate",
+                "score": 0.64,
+                "critical_missing_info": [],
+            }
+        ],
+        missing_info=[],
+        eligibility_verdicts={
+            "NCTLEGACY": {
+                "verdicts": [
+                    {
+                        "criterion_text": "EGFR mutation present",
+                        "verdict": "MEETS",
+                        "criterion_type": "inclusion",
+                    }
+                ]
+            }
+        },
+        trials_raw=[{}],
+        search_queries=["nsclc"],
+        decision_history=[],
+        qa_issues=[],
+    )
+
+    card = report["report_plan"]["moderate_matches"][0]
+    assert card["why_it_matches"] == []
+    assert "Unsupported match claim requires confirmation: EGFR mutation present" in card[
+        "key_uncertainties"
+    ]
+    assert card["evidence_summary_refs"][0]["source_type"] == "not_enough_evidence"
+    assert "EGFR mutation present" not in card["evidence_summary_refs"][0]["note"]
+
+
+@pytest.mark.asyncio
+async def test_unsupported_recommendation_and_next_action_claims_are_demoted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_generate_report_plan(**_kwargs):
+        return ReportPlan.model_validate(
+            {
+                "patient_summary": "64 year old patient with NSCLC",
+                "executive_summary": "Unsupported action traceability test.",
+                "bottom_line": "Verify biomarker status.",
+                "strong_matches": [],
+                "moderate_matches": [
+                    {
+                        "nct_id": "NCTUNSUP",
+                        "title": "Unsupported Trial",
+                        "tier": "moderate",
+                        "score": 0.64,
+                        "recommendation": "Patient is eligible because EGFR mutation present.",
+                        "why_it_matches": ["EGFR mutation present"],
+                        "main_blockers": [],
+                        "key_uncertainties": [],
+                        "next_action": "Refer now because EGFR mutation present.",
+                        "evidence_summary": "EGFR mutation present.",
+                    }
+                ],
+                "information_gaps": [],
+                "recommended_actions": [],
+                "excluded_summary": "none",
+                "limitations": [],
+            }
+        )
+
+    monkeypatch.setattr(report_generator, "generate_report_plan", fake_generate_report_plan)
+    report = await report_generator.build_report(
+        patient_profile={"age": 64, "primary_condition": "NSCLC"},
+        scored_trials=[
+            {
+                "trial_id": "NCTUNSUP",
+                "brief_title": "Unsupported Trial",
+                "tier": "moderate",
+                "score": 0.64,
+                "critical_missing_info": [],
+            }
+        ],
+        missing_info=[],
+        eligibility_verdicts={"NCTUNSUP": {"verdicts": []}},
+        trials_raw=[{}],
+        search_queries=["nsclc"],
+        decision_history=[],
+        qa_issues=[],
+    )
+
+    card = report["report_plan"]["moderate_matches"][0]
+    assert card["recommendation"].startswith("Uncertainty:")
+    assert card["next_action"].startswith("Uncertainty:")
+    text = build_text_report(report)
+    assert "Recommendation: Patient is eligible because EGFR mutation present." not in text
+    assert "Next action: Refer now because EGFR mutation present." not in text
 
 
 def test_n_a_leakage_in_gaps_triggers_sanitization_and_not_printed() -> None:

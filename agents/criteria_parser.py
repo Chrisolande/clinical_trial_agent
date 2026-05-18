@@ -152,7 +152,7 @@ async def parse_eligibility_criteria(eligibility_text: str, nct_id: str) -> dict
     if get_settings().use_cache:
         cached = await asyncio.to_thread(cache.get_cached, "criteria_parser", cache_params)
         if isinstance(cached, dict):
-            return cached
+            return _assign_ids(cached, prompt_input.nct_id)
 
     parsed_obj = await _parse_with_llm_or_raise(cache_params)
 

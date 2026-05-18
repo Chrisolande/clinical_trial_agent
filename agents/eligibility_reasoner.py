@@ -227,10 +227,21 @@ def _build_verdict_rows(
                 lookup_by_type_and_text=lookup_by_type_and_text,
                 lookup_by_text=lookup_by_text,
             )
+            effective_verdict = verdict_label
+            if metadata.get("source_type") == "not_enough_evidence" and verdict_label == "MEETS":
+                effective_verdict = "UNCERTAIN"
+                metadata["evidence_refs"] = [
+                    {
+                        **ref,
+                        "verdict": "UNCERTAIN",
+                    }
+                    for ref in list(metadata.get("evidence_refs") or [])
+                    if isinstance(ref, dict)
+                ]
             output.append(
                 {
                     **metadata,
-                    "verdict": verdict_label,
+                    "verdict": effective_verdict,
                     "criterion_type": kind,
                     "is_hard_exclusion": hard,
                 }

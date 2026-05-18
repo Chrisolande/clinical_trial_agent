@@ -40,6 +40,7 @@ async def test_parse_eligibility_criteria_uses_cache_hit(monkeypatch: pytest.Mon
     monkeypatch.setattr(criteria_parser.asyncio, "to_thread", fake_to_thread)
     result = await criteria_parser.parse_eligibility_criteria("Age >= 18 years and more text", "N1")
     assert result["inclusion_criteria"][0]["text"] == "cached"
+    assert result["inclusion_criteria"][0]["criterion_id"] == "N1_inc_0"
 
 
 def test_extract_json_dict_parses_fenced_json() -> None:
