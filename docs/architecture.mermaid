@@ -1,8 +1,10 @@
 flowchart TD
-    CLI[clinical-trial-agent run] --> SUP[langgraph_app end_to_end_graph]
-    SUP --> RET[COMPILED_RETRIEVAL]
-    SUP --> ELI[COMPILED_ELIGIBILITY]
-    SUP --> SYN[COMPILED_SYNTHESIS]
+    CLI[clinical-trial-agent run] --> CSG[compile_supervisor_graph]
+    CSG --> SUP[SupervisorOrchestrator]
+    SUP --> PIPE[run_tools_pipeline]
+    PIPE --> RET[compiled_retrieval_graph]
+    PIPE --> ELI[compiled_eligibility_graph]
+    PIPE --> SYN[compiled_synthesis_graph]
 
     RET --> CT[ClinicalTrials.gov API]
     ELI --> LLM[DeepSeek / configured LLM]
@@ -10,3 +12,8 @@ flowchart TD
 
     SUP --> MEM[(PostgreSQL memory/cache)]
     SUP --> CHK[(LangGraph checkpointer)]
+
+    LGDEV[LangGraph dev server] -. dev/testing only .-> E2E[langgraph_app end_to_end_graph]
+    E2E -. inspection .-> DEVRET[COMPILED_RETRIEVAL]
+    E2E -. inspection .-> DEVELI[COMPILED_ELIGIBILITY]
+    E2E -. inspection .-> DEVSYN[COMPILED_SYNTHESIS]

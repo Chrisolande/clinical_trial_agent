@@ -1,3 +1,11 @@
+"""LangGraph dev-server exports.
+
+The top-level ``end_to_end_graph`` is inspection-oriented and not
+production-equivalent. Production CLI runs go through ``SupervisorOrchestrator``
+and ``run_tools_pipeline``, which include memory, audit, feedback, profile
+projection, and fuller retry semantics that this dev graph does not replicate.
+"""
+
 from typing import Any, Literal, TypedDict
 
 from langchain_core.runnables import RunnableConfig

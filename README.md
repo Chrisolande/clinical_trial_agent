@@ -354,6 +354,16 @@ The CI pipeline checks:
 uv run langgraph dev --config langgraph.json --no-browser
 ```
 
+The exported `clinical_trial_agent` `end_to_end_graph` is for development,
+inspection, and subgraph testing. It is not production-equivalent: it does not
+provide the full supervisor memory, audit, feedback, and retry behavior.
+
+The canonical production path is:
+
+```text
+clinical-trial-agent run -> compile_supervisor_graph -> SupervisorOrchestrator -> run_tools_pipeline
+```
+
 Exported graphs:
 
 - `clinical_trial_agent`
