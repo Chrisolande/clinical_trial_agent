@@ -46,6 +46,40 @@ async def test_parse_eligibility_criteria_uses_cache_hit(monkeypatch: pytest.Mon
     assert result["inclusion_criteria"][0]["criterion_id"] == "N1_inc_0"
 
 
+@pytest.mark.asyncio
+async def test_parse_eligibility_criteria_normalizes_cached_description_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        criteria_parser,
+        "get_settings",
+        lambda: SimpleNamespace(use_cache=True, criteria_text_max_chars=8000),
+    )
+
+    async def fake_to_thread(func, *args, **kwargs):
+        _ = (args, kwargs)
+        if func is criteria_parser.cache.get_cached:
+            return {
+                "inclusion_criteria": [
+                    {
+                        "description": "HER2 positive disease.",
+                        "is_hard_exclusion": False,
+                        "category": "biomarker",
+                    }
+                ],
+                "exclusion_criteria": [],
+            }
+        return None
+
+    monkeypatch.setattr(criteria_parser.asyncio, "to_thread", fake_to_thread)
+    result = await criteria_parser.parse_eligibility_criteria(
+        "Inclusion Criteria:\nHER2 positive disease.", "N1"
+    )
+
+    assert result["inclusion_criteria"][0]["text"] == "HER2 positive disease."
+    assert "description" not in result["inclusion_criteria"][0]
+
+
 def test_extract_json_dict_parses_fenced_json() -> None:
     text = """```json
     {"inclusion_criteria": [], "exclusion_criteria": []}
@@ -58,6 +92,30 @@ def test_extract_json_dict_parses_wrapped_json() -> None:
     text = 'LLM output: {"inclusion_criteria": [], "exclusion_criteria": []}'
     parsed = criteria_parser._extract_json_dict_from_text(text)
     assert parsed == {"inclusion_criteria": [], "exclusion_criteria": []}
+
+
+def test_parsed_criterion_accepts_description_alias() -> None:
+    parsed = ParsedEligibilityCriterion.model_validate(
+        {
+            "inclusion_criteria": [
+                {
+                    "description": "Patient must be 18 years or older.",
+                    "is_hard_exclusion": False,
+                    "category": "age",
+                }
+            ],
+            "exclusion_criteria": [
+                {
+                    "description": "History of severe hypersensitivity.",
+                    "is_hard_exclusion": True,
+                    "category": "other",
+                }
+            ],
+        }
+    )
+
+    assert parsed.inclusion_criteria[0].text == "Patient must be 18 years or older."
+    assert parsed.exclusion_criteria[0].text == "History of severe hypersensitivity."
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,6 @@
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 CriterionCategory = Literal[
     "age", "lab", "biomarker", "diagnosis", "medication", "performance", "other"
@@ -13,6 +13,19 @@ class EligibilityCriterion(BaseModel):
         description="True for all exclusion criteria and critical safety exclusions."
     )
     category: CriterionCategory = Field(description="Clinical category of the criterion.")
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_text_aliases(cls, data: Any) -> Any:
+        if not isinstance(data, dict) or data.get("text"):
+            return data
+
+        for alias in ("description", "criterion", "criteria", "requirement"):
+            value = data.get(alias)
+            if isinstance(value, str) and value.strip():
+                return {**data, "text": value.strip()}
+
+        return data
 
 
 class ParsedEligibilityCriterion(BaseModel):

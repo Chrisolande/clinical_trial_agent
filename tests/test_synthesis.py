@@ -115,6 +115,76 @@ async def test_generate_report_plan_uses_reportplan_model(monkeypatch: pytest.Mo
     assert captured["context"]
 
 
+@pytest.mark.asyncio
+async def test_generate_report_plan_falls_back_when_structured_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {"get_llm_calls": 0}
+
+    class DummyPrompt:
+        def __or__(self, other):
+            return other
+
+    class StructuredChain:
+        async def ainvoke(self, context, config=None):
+            captured["structured_context"] = context
+            captured["structured_config"] = config
+            return None
+
+    class UnstructuredLLM:
+        async def ainvoke(self, context, config=None):
+            captured["unstructured_context"] = context
+            captured["unstructured_config"] = config
+            return """
+            {
+              "patient_summary": "summary",
+              "executive_summary": "comparative summary",
+              "bottom_line": "summary bottom line",
+              "strong_matches": [],
+              "moderate_matches": [],
+              "information_gaps": [],
+              "recommended_actions": [],
+              "excluded_summary": "none",
+              "limitations": []
+            }
+            """
+
+    class StructuredLLM:
+        def with_structured_output(self, model):
+            captured["structured_model"] = model
+            return StructuredChain()
+
+    def fake_get_llm(**kwargs):
+        captured["get_llm_calls"] = int(captured["get_llm_calls"]) + 1
+        captured["get_llm_kwargs"] = kwargs
+        if captured["get_llm_calls"] == 1:
+            return StructuredLLM()
+        return UnstructuredLLM()
+
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setattr(report_synthesizer, "get_llm", fake_get_llm)
+    monkeypatch.setattr(
+        report_synthesizer.ChatPromptTemplate, "from_template", lambda _template: DummyPrompt()
+    )
+
+    out = await report_synthesizer.generate_report_plan(
+        patient_profile={"age": 60, "sex": "male", "primary_condition": "NSCLC"},
+        scored_trials=[],
+        eligibility_verdicts={},
+        missing_info=[],
+        qa_issues=[],
+    )
+
+    assert isinstance(out, ReportPlan)
+    assert out.executive_summary == "comparative summary"
+    assert captured["structured_model"] is ReportPlan
+    assert captured["get_llm_calls"] == 2
+    assert captured["unstructured_config"] == {
+        "run_name": "report_plan_unstructured",
+        "tags": ["synthesis", "report", "unstructured"],
+    }
+
+
 def _report_plan() -> ReportPlan:
     return ReportPlan.model_validate(
         {

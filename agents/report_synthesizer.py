@@ -4,7 +4,9 @@ from collections import Counter
 from collections.abc import Sequence
 from typing import Any
 
+from langchain_core.messages import BaseMessage
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.utils.json import parse_json_markdown
 from loguru import logger
 from models.report import ReportPlan
 from prompts.synthesis import build_synthesis_prompt
@@ -169,6 +171,93 @@ def _retrieval_failed_with_zero_trials(
     return "RETRIEVAL_FAILED_EMPTY_RESULT" in issue_codes
 
 
+def _extract_text_from_message(result: Any) -> str:
+    if isinstance(result, str):
+        return result
+
+    if isinstance(result, BaseMessage):
+        content = result.content
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                    parts.append(str(item["text"]))
+            return "\n".join(parts)
+
+    content = getattr(result, "content", None)
+    if isinstance(content, str):
+        return content
+
+    return str(result)
+
+
+def _extract_json_dict_from_text(text: str) -> dict[str, Any] | None:
+    cleaned = str(text or "").strip()
+    if not cleaned:
+        return None
+
+    try:
+        parsed = json.loads(cleaned)
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        pass
+
+    try:
+        parsed = parse_json_markdown(cleaned)
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        pass
+
+    start = cleaned.find("{")
+    if start == -1:
+        return None
+
+    depth = 0
+    in_string = False
+    escape = False
+    end: int | None = None
+    for idx, ch in enumerate(cleaned[start:], start=start):
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                end = idx
+                break
+
+    if end is None:
+        return None
+
+    try:
+        parsed = json.loads(cleaned[start : end + 1])
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        return None
+
+
+def _extract_json_object_or_raise(text: str) -> dict[str, Any]:
+    parsed = _extract_json_dict_from_text(text)
+    if isinstance(parsed, dict):
+        return parsed
+    cleaned = str(text or "").strip()
+    raise ValueError(f"No JSON object found in report plan LLM output: {cleaned[:500]}") from None
+
+
 @llm_retry
 async def _invoke_report_plan_llm(chain: Any, context: dict[str, Any]) -> ReportPlan:
     result = await asyncio.wait_for(
@@ -181,6 +270,28 @@ async def _invoke_report_plan_llm(chain: Any, context: dict[str, Any]) -> Report
     if not isinstance(result, ReportPlan):
         raise ValueError(f"Unexpected report plan result type: {type(result)}")
     return result
+
+
+@llm_retry
+async def _invoke_unstructured_report_plan_llm(chain: Any, context: dict[str, Any]) -> ReportPlan:
+    result = await asyncio.wait_for(
+        chain.ainvoke(
+            context,
+            config={
+                "run_name": "report_plan_unstructured",
+                "tags": ["synthesis", "report", "unstructured"],
+            },
+        ),
+        timeout=get_settings().llm_call_timeout_seconds,
+    )
+
+    if isinstance(result, ReportPlan):
+        return result
+    if isinstance(result, dict):
+        return ReportPlan.model_validate(result)
+
+    text = _extract_text_from_message(result)
+    return ReportPlan.model_validate(_extract_json_object_or_raise(text))
 
 
 async def generate_report_plan(
@@ -233,7 +344,16 @@ async def generate_report_plan(
     ).with_structured_output(ReportPlan)
 
     try:
-        report_plan = await _invoke_report_plan_llm(chain, context)
+        try:
+            report_plan = await _invoke_report_plan_llm(chain, context)
+        except Exception as structured_exc:
+            logger.warning(
+                "Structured report planning failed. Retrying with unstructured LLM parse + "
+                "Pydantic validation. Error: {}",
+                structured_exc,
+            )
+            unstructured_chain = prompt | get_llm(contains_phi=False, node_name="report_synthesis")
+            report_plan = await _invoke_unstructured_report_plan_llm(unstructured_chain, context)
     except Exception as exc:
         if _retrieval_failed_with_zero_trials(scored_trials, qa_issues):
             patient_summary = _describe_patient(patient_profile)

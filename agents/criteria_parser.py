@@ -134,6 +134,22 @@ def _ensure_non_empty_parse(parsed: ParsedEligibilityCriterion, nct_id: str) -> 
     )
 
 
+def _normalize_parsed_criteria(parsed: dict[str, Any]) -> dict[str, Any]:
+    normalized = {
+        "inclusion_criteria": [
+            {"is_hard_exclusion": False, "category": "other", **crit}
+            for crit in parsed.get("inclusion_criteria", [])
+            if isinstance(crit, dict)
+        ],
+        "exclusion_criteria": [
+            {"is_hard_exclusion": True, "category": "other", **crit}
+            for crit in parsed.get("exclusion_criteria", [])
+            if isinstance(crit, dict)
+        ],
+    }
+    return ParsedEligibilityCriterion.model_validate(normalized).model_dump()
+
+
 async def parse_eligibility_criteria(eligibility_text: str, nct_id: str) -> dict[str, Any]:
     if not eligibility_text or len(eligibility_text.strip()) < 20:
         return {"inclusion_criteria": [], "exclusion_criteria": []}
@@ -152,7 +168,7 @@ async def parse_eligibility_criteria(eligibility_text: str, nct_id: str) -> dict
     if get_settings().use_cache:
         cached = await asyncio.to_thread(cache.get_cached, "criteria_parser", cache_params)
         if isinstance(cached, dict):
-            return _assign_ids(cached, prompt_input.nct_id)
+            return _assign_ids(_normalize_parsed_criteria(cached), prompt_input.nct_id)
 
     parsed_obj = await _parse_with_llm_or_raise(cache_params)
 
